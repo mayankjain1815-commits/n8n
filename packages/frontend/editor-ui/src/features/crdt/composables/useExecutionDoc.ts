@@ -27,7 +27,10 @@ import type {
 	NodeExecutionChange,
 	EdgeExecutionChange,
 	ExecutionMetaChange,
+	ResolvedValue,
+	ResolvedParamChange,
 } from '../types/executionDocument.types';
+import { resolvedParamKey, parseResolvedParamKey } from '../types/executionDocument.types';
 
 // Type aliases for cleaner code
 type TaskDataMap = CRDTMap<unknown>;
@@ -99,6 +102,7 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 	const metaChangeHook = createEventHook<ExecutionMetaChange>();
 	const nodeExecutionChangeHook = createEventHook<NodeExecutionChange>();
 	const edgeExecutionChangeHook = createEventHook<EdgeExecutionChange>();
+	const resolvedParamChangeHook = createEventHook<ResolvedParamChange>();
 
 	// Track current execution ID to detect new executions
 	let currentExecutionId: string | null = null;
@@ -107,6 +111,7 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 	let unsubscribeMeta: (() => void) | null = null;
 	let unsubscribeRunData: (() => void) | null = null;
 	let unsubscribeEdges: (() => void) | null = null;
+	let unsubscribeResolvedParams: (() => void) | null = null;
 
 	// Handle CRDT document ready
 	crdt.onReady((crdtDoc) => {
@@ -225,6 +230,29 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 				}
 			}
 		});
+
+		// Subscribe to resolved params changes
+		const resolvedParamsMap = doc.getMap<unknown>('resolvedParams');
+		unsubscribeResolvedParams = resolvedParamsMap.onDeepChange((changes, _origin) => {
+			console.log('[useExecutionDoc] resolvedParams changed, changes:', changes.length);
+			for (const change of changes) {
+				console.log('[useExecutionDoc] change:', change);
+				if (!isMapChange(change)) continue;
+
+				// Key format: "{nodeId}:{paramPath}"
+				const key = change.path[0];
+				if (typeof key !== 'string') continue;
+
+				const parsed = parseResolvedParamKey(key);
+				console.log('[useExecutionDoc] parsed key:', parsed);
+				if (parsed) {
+					void resolvedParamChangeHook.trigger({
+						nodeId: parsed.nodeId,
+						paramPath: parsed.paramPath,
+					});
+				}
+			}
+		});
 	}
 
 	// --- Data Access ---
@@ -308,6 +336,43 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 		return nodeName ?? null;
 	}
 
+	// --- Resolved Params ---
+
+	/**
+	 * Get a resolved value for a specific parameter path.
+	 * @param nodeId - The node ID
+	 * @param paramPath - The parameter path (e.g., "parameters.value")
+	 */
+	function getResolvedParam(nodeId: string, paramPath: string): ResolvedValue | null {
+		if (!doc) return null;
+		const resolvedParamsMap = doc.getMap<unknown>('resolvedParams');
+		const key = resolvedParamKey(nodeId, paramPath);
+		const value = resolvedParamsMap.get(key);
+		if (!value) return null;
+		return toJSON(value) as ResolvedValue;
+	}
+
+	/**
+	 * Get all resolved values for a node.
+	 * Returns a Map of paramPath → ResolvedValue
+	 */
+	function getAllResolvedParams(nodeId: string): Map<string, ResolvedValue> {
+		const result = new Map<string, ResolvedValue>();
+		if (!doc) return result;
+
+		const resolvedParamsMap = doc.getMap<unknown>('resolvedParams');
+		const prefix = `${nodeId}:`;
+
+		for (const [key, value] of resolvedParamsMap.entries()) {
+			if (key.startsWith(prefix)) {
+				const paramPath = key.slice(prefix.length);
+				result.set(paramPath, toJSON(value) as ResolvedValue);
+			}
+		}
+
+		return result;
+	}
+
 	// --- Lifecycle ---
 
 	async function connect(): Promise<void> {
@@ -321,6 +386,8 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 		unsubscribeRunData = null;
 		unsubscribeEdges?.();
 		unsubscribeEdges = null;
+		unsubscribeResolvedParams?.();
+		unsubscribeResolvedParams = null;
 		crdt.disconnect();
 		doc = null;
 	}
@@ -343,9 +410,12 @@ export function useExecutionDoc(options: UseExecutionDocOptions): ExecutionDocum
 		getEdgeExecution,
 		getCallingNodes,
 		getNodeNameById,
+		getResolvedParam,
+		getAllResolvedParams,
 		onExecutionStarted: executionStartedHook.on,
 		onMetaChange: metaChangeHook.on,
 		onNodeExecutionChange: nodeExecutionChangeHook.on,
 		onEdgeExecutionChange: edgeExecutionChangeHook.on,
+		onResolvedParamChange: resolvedParamChangeHook.on,
 	};
 }

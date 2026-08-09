@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { provide, watch, reactive, onUnmounted, computed } from 'vue';
-import { WorkflowStateKey } from '@/app/constants';
+import { provide, watch, reactive, onUnmounted, computed, inject, ref } from 'vue';
+import {
+	WorkflowStateKey,
+	CrdtExpressionResolverKey,
+	CrdtNodeIdKey,
+	CrdtAutocompleteResolverKey,
+} from '@/app/constants';
 import type { WorkflowState } from '@/app/composables/useWorkflowState';
 import { useWorkflowDoc } from '../composables/useWorkflowSync';
 import { useCrdtWorkflowState } from '../composables/useCrdtWorkflowState';
+import { useCrdtExpressionResolver } from '../composables/useCrdtExpressionResolver';
 import CrdtNodeSettings from './CrdtNodeSettings.vue';
+import CrdtResolvedExpressionDisplay from './CrdtResolvedExpressionDisplay.vue';
 import type { INodeUi } from '@/Interface';
 import type { WorkflowNode } from '../types/workflowDocument.types';
 import type { Unsubscribe } from '@n8n/crdt';
+import type { ExecutionDocument } from '../types/executionDocument.types';
+import { formatResolvedValue } from '../utils/formatting';
 
 const selectedNodeId = defineModel<string | null>({
 	default: null,
@@ -104,6 +113,80 @@ onUnmounted(() => {
 const workflowState = useCrdtWorkflowState(doc, getNodeIdByName) as WorkflowState;
 provide(WorkflowStateKey, workflowState);
 
+// Provide current node ID for CRDT expression resolution
+const currentNodeId = computed(() => selectedNodeId.value ?? undefined);
+provide(CrdtNodeIdKey, currentNodeId);
+
+// Create CRDT autocomplete resolver for expression editor code completion
+// This routes expression resolution through the coordinator worker
+const activeNodeName = computed(() => activeNode.value?.name);
+const crdtAutocompleteResolver = useCrdtExpressionResolver(
+	computed(() => doc.workflowId),
+	activeNodeName,
+);
+provide(CrdtAutocompleteResolverKey, crdtAutocompleteResolver);
+
+// Inject execution document (provided by CrdtTestContent)
+const executionDoc = inject<ExecutionDocument | null>('executionDoc', null);
+
+// Reactive version counter for CRDT expression resolver
+// Increments when resolvedParams changes in the execution document
+const resolvedParamsVersion = ref(0);
+
+// Subscribe to resolvedParams changes to trigger re-resolution in inline displays
+const resolvedParamsSubscription = executionDoc?.onResolvedParamChange(() => {
+	// Increment version to trigger re-resolution in useResolvedExpression
+	resolvedParamsVersion.value++;
+});
+
+onUnmounted(() => {
+	resolvedParamsSubscription?.off();
+});
+
+// Provide CRDT expression resolver for ParameterInputWrapper to use
+// This replaces on-demand resolution with pre-computed CRDT values
+provide(CrdtExpressionResolverKey, {
+	version: resolvedParamsVersion,
+	getResolved(
+		nodeId: string,
+		paramPath: string,
+	): {
+		value: unknown;
+		display: string;
+		state: 'valid' | 'pending' | 'invalid';
+		error?: string;
+	} | null {
+		// Always return something in CRDT mode to prevent fallback to standard resolution
+		if (!executionDoc) {
+			return {
+				value: null,
+				display: '[CRDT] no exec doc',
+				state: 'invalid',
+				error: 'No execution document',
+			};
+		}
+
+		// Ensure path starts with "parameters." for CRDT lookup
+		const fullPath = paramPath.startsWith('parameters.') ? paramPath : `parameters.${paramPath}`;
+		const resolved = executionDoc.getResolvedParam(nodeId, fullPath);
+		if (!resolved) {
+			// No resolved value yet - default to pending (waiting for coordinator to resolve)
+			return {
+				value: null,
+				display: '',
+				state: 'pending',
+			};
+		}
+
+		return {
+			value: resolved.resolved,
+			display: formatResolvedValue(resolved),
+			state: resolved.state,
+			error: resolved.error,
+		};
+	},
+});
+
 function handleClose() {
 	selectedNodeId.value = null;
 }
@@ -134,6 +217,8 @@ function handleValueChanged(event: { name: string; value: unknown; oldValue?: un
 			@close="handleClose"
 			@value-changed="handleValueChanged"
 		/>
+		<!-- Resolved Expressions from CRDT (read-only display) -->
+		<CrdtResolvedExpressionDisplay v-if="selectedNodeId" :node-id="selectedNodeId" />
 	</div>
 </template>
 

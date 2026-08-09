@@ -26,6 +26,7 @@ import type {
 	NodeExecuteAfterDataPushData,
 	ExecutionFinishedPushData,
 } from '../../../../features/crdt/types/executionDocument.types';
+import { resolveNodeExpressions, resolveAllNodeExpressions } from './resolveExpressions';
 
 // Single push connection for the coordinator (lazy initialized on first execute)
 let pushConnection: WebSocket | null = null;
@@ -52,7 +53,7 @@ function ensureExecutionProvider(): ReturnType<typeof createCRDTProvider> {
  * Get or create an execution document for a workflow.
  * Execution documents are keyed by `exec-{workflowId}`.
  */
-function getOrCreateExecutionDoc(
+export function getOrCreateExecutionDoc(
 	state: CoordinatorState,
 	workflowId: string,
 ): CRDTExecutionDocumentState {
@@ -102,8 +103,25 @@ function broadcastExecutionUpdate(
 	execDocId: string,
 	update: Uint8Array,
 ): void {
-	state.crdtSubscriptions.forEach((subscription) => {
-		if (subscription.docIds.has(execDocId)) {
+	console.log(
+		'[CRDT broadcastExecutionUpdate] Broadcasting to execDocId:',
+		execDocId,
+		'subscriptions:',
+		state.crdtSubscriptions.size,
+	);
+	state.crdtSubscriptions.forEach((subscription, tabId) => {
+		const hasDoc = subscription.docIds.has(execDocId);
+		console.log(
+			'[CRDT broadcastExecutionUpdate] Tab',
+			tabId,
+			'subscribed to',
+			execDocId,
+			':',
+			hasDoc,
+			'docIds:',
+			Array.from(subscription.docIds),
+		);
+		if (hasDoc) {
 			sendToTab(subscription.crdtPort, MESSAGE_SYNC, execDocId, update);
 		}
 	});
@@ -309,22 +327,39 @@ function handleNodeExecuteAfterMessage(data: NodeExecuteAfterPushData): void {
  * Adds the actual output data to the task.
  */
 function handleNodeExecuteAfterDataMessage(data: NodeExecuteAfterDataPushData): void {
+	console.log('[CRDT Push] nodeExecuteAfterData received:', {
+		nodeName: data.nodeName,
+		executionId: data.executionId,
+		hasData: !!data.data?.data,
+		executionIndex: data.data?.executionIndex,
+	});
+
 	if (!coordinatorState) return;
 
 	// Find the execution doc by executionId
 	const docState = findExecutionDocByExecutionId(coordinatorState, data.executionId);
 	if (!docState) {
+		console.log('[CRDT Push] No docState found for executionId:', data.executionId);
 		return;
 	}
 
 	// Get workflow doc for edge lookup
 	const workflowDoc = getWorkflowDoc(coordinatorState, docState.workflowId);
 	if (!workflowDoc) {
+		console.log('[CRDT Push] No workflowDoc found for workflowId:', docState.workflowId);
 		return;
 	}
 
+	console.log('[CRDT Push] Updating execution document for node:', data.nodeName);
 	// Update execution document
 	handleNodeExecuteAfterData(docState.doc, workflowDoc, data);
+
+	// Re-resolve expressions for ALL nodes now that we have new execution data
+	// Expressions like $('nodeName') can reference any node, not just parents
+	const workflowDocState = coordinatorState.crdtDocuments.get(docState.workflowId);
+	if (workflowDocState?.workflow) {
+		resolveAllNodeExpressions(coordinatorState, workflowDocState, docState);
+	}
 
 	// Broadcast update
 	const update = docState.doc.encodeState();

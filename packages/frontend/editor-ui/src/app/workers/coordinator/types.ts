@@ -132,3 +132,27 @@ export interface WorkerMessage {
 	payload?: unknown;
 	port?: MessagePort;
 }
+
+/**
+ * Request to resolve an arbitrary expression for autocomplete.
+ * The coordinator resolves using its synced Workflow instance.
+ */
+export interface ResolveExpressionRequest {
+	type: 'resolveExpression';
+	requestId: string;
+	workflowId: string;
+	expression: string;
+	nodeName: string;
+}
+
+/**
+ * Response with the resolved expression value.
+ */
+export interface ResolveExpressionResponse {
+	type: 'resolveExpressionResult';
+	requestId: string;
+	result: {
+		resolved: unknown;
+		error?: string;
+	};
+}

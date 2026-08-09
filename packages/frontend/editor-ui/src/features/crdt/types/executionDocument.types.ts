@@ -127,6 +127,21 @@ export interface ExecutionDocument {
 	 */
 	getNodeNameById(nodeId: string): string | null;
 
+	// --- Resolved Expressions ---
+
+	/**
+	 * Get a resolved expression value for a specific parameter path.
+	 * @param nodeId - The node ID
+	 * @param paramPath - The parameter path (e.g., "parameters.value")
+	 */
+	getResolvedParam(nodeId: string, paramPath: string): ResolvedValue | null;
+
+	/**
+	 * Get all resolved expression values for a node.
+	 * Returns a Map of paramPath → ResolvedValue
+	 */
+	getAllResolvedParams(nodeId: string): Map<string, ResolvedValue>;
+
 	// --- Events ---
 
 	/** Subscribe to execution started (new execution, clears previous data) */
@@ -140,6 +155,9 @@ export interface ExecutionDocument {
 
 	/** Subscribe to edge execution changes (item counts) */
 	onEdgeExecutionChange: EventHookOn<EdgeExecutionChange>;
+
+	/** Subscribe to resolved params changes */
+	onResolvedParamChange: EventHookOn<ResolvedParamChange>;
 }
 
 /**
@@ -195,3 +213,69 @@ export type ExecutionPushData =
 	| { type: 'nodeExecuteAfter'; data: NodeExecuteAfterPushData }
 	| { type: 'nodeExecuteAfterData'; data: NodeExecuteAfterDataPushData }
 	| { type: 'executionFinished'; data: ExecutionFinishedPushData };
+
+// =============================================================================
+// Resolved Expression Types
+// =============================================================================
+
+/**
+ * Resolution state for an expression.
+ * - 'valid': Expression resolved successfully
+ * - 'pending': Expression needs execution data that doesn't exist yet
+ * - 'invalid': Expression has a syntax error or other issue
+ */
+export type ResolvedState = 'valid' | 'pending' | 'invalid';
+
+/**
+ * A resolved expression value stored in the execution document.
+ * Keyed by "{nodeId}:{paramPath}" in the resolvedParams map.
+ */
+export interface ResolvedValue {
+	/** The original expression (e.g., "={{ $json.name }}") */
+	expression: string;
+	/** The resolved value (e.g., "John") or null if pending/invalid */
+	resolved: unknown;
+	/** Resolution state */
+	state: ResolvedState;
+	/** Error message if state is 'invalid' */
+	error?: string;
+	/** Last resolution timestamp */
+	resolvedAt: number;
+}
+
+/**
+ * Event payload for resolved params changes.
+ */
+export interface ResolvedParamChange {
+	nodeId: string;
+	paramPath: string;
+}
+
+/**
+ * Create a key for the resolvedParams map.
+ * Format: "{nodeId}:{paramPath}"
+ *
+ * @example
+ * resolvedParamKey('abc123', 'parameters.value') // "abc123:parameters.value"
+ * resolvedParamKey('abc123', 'parameters.options.retry') // "abc123:parameters.options.retry"
+ */
+export function resolvedParamKey(nodeId: string, paramPath: string): string {
+	return `${nodeId}:${paramPath}`;
+}
+
+/**
+ * Parse a resolvedParams map key into its components.
+ * Returns null if the key is invalid.
+ *
+ * @example
+ * parseResolvedParamKey('abc123:parameters.value')
+ * // { nodeId: 'abc123', paramPath: 'parameters.value' }
+ */
+export function parseResolvedParamKey(key: string): { nodeId: string; paramPath: string } | null {
+	const colonIndex = key.indexOf(':');
+	if (colonIndex === -1) return null;
+	return {
+		nodeId: key.slice(0, colonIndex),
+		paramPath: key.slice(colonIndex + 1),
+	};
+}

@@ -1,7 +1,17 @@
 <script setup lang="ts">
+/**
+ * CRDT Parameter Input Wrapper
+ *
+ * A CRDT-aware version of ParameterInputWrapper that reads resolved expression
+ * values from the CRDT execution document instead of resolving on-demand.
+ *
+ * Key difference: The standard ParameterInputWrapper uses useResolvedExpression
+ * which calls resolveExpression() with stores/execution data. This version uses
+ * useCrdtResolvedExpression which reads pre-computed values from CRDT.
+ */
 import type { IUpdateInformation, InputSize } from '@/Interface';
-import ParameterInput from './ParameterInput.vue';
-import InputHint from './ParameterInputHint.vue';
+import ParameterInput from '@/features/ndv/parameters/components/ParameterInput.vue';
+import InputHint from '@/features/ndv/parameters/components/ParameterInputHint.vue';
 import {
 	isResourceLocatorValue,
 	type IDataObject,
@@ -11,21 +21,22 @@ import {
 	type NodeParameterValueType,
 } from 'n8n-workflow';
 
-import { useResolvedExpression } from '@/app/composables/useResolvedExpression';
 import useEnvironmentsStore from '@/features/settings/environments.ee/environments.store';
 import { useExternalSecretsStore } from '@/features/integrations/externalSecrets.ee/externalSecrets.ee.store';
-import { useNDVStore } from '@/features/ndv/shared/ndv.store';
 import { useBinaryDataAccessTooltip } from '@/features/ndv/shared/composables/useBinaryDataAccessTooltip';
 import { isValueExpression, parseResourceMapperFieldName } from '@/app/utils/nodeTypesUtils';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
-import { computed, useTemplateRef } from 'vue';
+import { computed, useTemplateRef, toRef } from 'vue';
 
 import { N8nTooltip } from '@n8n/design-system';
+import { useCrdtResolvedExpression } from '../composables/useCrdtResolvedExpression';
+
 type Props = {
 	parameter: INodeProperties;
 	path: string;
 	modelValue: NodeParameterValueType;
+	nodeId: string;
 	additionalExpressionData?: IDataObject;
 	rows?: number;
 	isReadOnly?: boolean;
@@ -61,7 +72,6 @@ const emit = defineEmits<{
 	textInput: [value: IUpdateInformation];
 }>();
 
-const ndvStore = useNDVStore();
 const externalSecretsStore = useExternalSecretsStore();
 const environmentsStore = useEnvironmentsStore();
 const { binaryDataAccessTooltip } = useBinaryDataAccessTooltip();
@@ -98,10 +108,6 @@ const parameterHint = computed(() => {
 	return props.hint;
 });
 
-const targetItem = computed(() => ndvStore.expressionTargetItem);
-
-const isInputParentOfActiveNode = computed(() => ndvStore.isInputParentOfActiveNode);
-
 const expression = computed(() => {
 	if (!isExpression.value) return '';
 	return isResourceLocatorValue(props.modelValue) ? props.modelValue.value : props.modelValue;
@@ -117,13 +123,11 @@ const resolvedAdditionalExpressionData = computed(() => {
 	};
 });
 
-const { resolvedExpression, resolvedExpressionString } = useResolvedExpression({
-	expression,
-	additionalData: resolvedAdditionalExpressionData,
-	isForCredential: props.isForCredential,
-	stringifyObject: props.parameter.type !== 'multiOptions',
-	// For CRDT mode: path is used to look up pre-computed resolved values
-	paramPath: props.path,
+// Use CRDT-based resolution instead of on-demand resolution
+const { resolvedExpression, resolvedExpressionString } = useCrdtResolvedExpression({
+	nodeId: toRef(() => props.nodeId),
+	paramPath: toRef(() => props.path),
+	expression: toRef(() => expression.value),
 });
 
 const parsedParameterName = computed(() => {
@@ -214,7 +218,7 @@ defineExpose({
 					v-if="resolvedExpressionString"
 					:class="{ [$style.hint]: true, 'ph-no-capture': isForCredential }"
 					:data-test-id="`parameter-expression-preview-${parsedParameterName}`"
-					:highlight="!!(resolvedExpressionString && targetItem) && isInputParentOfActiveNode"
+					:highlight="false"
 					:hint="resolvedExpressionString"
 					:single-line="true"
 				/>

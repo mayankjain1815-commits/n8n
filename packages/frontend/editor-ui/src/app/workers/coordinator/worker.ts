@@ -40,6 +40,11 @@ import { initializeCrdtSubscription, cleanupCrdtSubscription } from './operation
 import { executeWorkflow as executeWorkflowOp } from './operations/execute';
 import { ensurePushConnection as ensurePushConnectionOp } from './operations/executionPush';
 import { initialize as initializeOp } from './initialize';
+import {
+	resolveExpressionForAutocomplete,
+	getRunDataFromExecDoc,
+	getPinDataFromWorkflowDoc,
+} from './operations/resolveExpressions';
 
 // Create nodeTypes promise that will be resolved when loadNodeTypes completes
 let nodeTypesResolver: (() => void) | null = null;
@@ -189,6 +194,43 @@ const coordinatorApi = {
 			const executionId = await executeWorkflowOp(state, workflowId, pushRef, triggerNodeName);
 
 			return executionId;
+		} catch {
+			return null;
+		}
+	},
+
+	/**
+	 * Resolve an arbitrary expression for autocomplete purposes.
+	 * Uses the coordinator's synced Workflow instance and execution data.
+	 *
+	 * @param workflowId - The workflow ID
+	 * @param expression - The expression to resolve (e.g., "={{ $json }}")
+	 * @param nodeName - The node context for resolution
+	 * @returns The resolved value, or null if resolution fails
+	 */
+	async resolveExpression(
+		workflowId: string,
+		expression: string,
+		nodeName: string,
+	): Promise<unknown> {
+		const docState = state.crdtDocuments.get(workflowId);
+		const execDocState = state.crdtExecutionDocuments.get(`exec-${workflowId}`);
+
+		if (!docState?.workflow) {
+			return null;
+		}
+
+		try {
+			const runData = execDocState ? getRunDataFromExecDoc(execDocState) : null;
+			const pinData = getPinDataFromWorkflowDoc(docState.doc);
+
+			return resolveExpressionForAutocomplete(
+				docState.workflow,
+				nodeName,
+				expression,
+				runData,
+				pinData,
+			);
 		} catch {
 			return null;
 		}

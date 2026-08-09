@@ -54,7 +54,9 @@ import {
 	type NodeConnectionType,
 } from 'n8n-workflow';
 
-import type { CoordinatorState, CRDTDocumentState } from '../types';
+import type { CoordinatorState, CRDTDocumentState, CRDTExecutionDocumentState } from '../types';
+import { getOrCreateExecutionDoc } from './executionPush';
+import { resolveAllNodeExpressions, resolveNodeExpressions } from './resolveExpressions';
 
 // =============================================================================
 // CRDT Provider Initialization
@@ -714,6 +716,68 @@ function broadcastToSubscribedTabs(
 }
 
 // =============================================================================
+// Expression Resolution Observer
+// =============================================================================
+
+/**
+ * Set up an observer to re-resolve expressions when node parameters change.
+ * Returns an unsubscribe function.
+ */
+function setupExpressionResolution(
+	state: CoordinatorState,
+	docState: CRDTDocumentState,
+	execDocState: CRDTExecutionDocumentState,
+): () => void {
+	const nodesMap = docState.doc.getMap('nodes');
+
+	// Track which nodes need re-resolution (debounce multiple changes)
+	let pendingNodeIds = new Set<string>();
+	let resolveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// Use onDeepChange which returns an unsubscribe function
+	const unsubscribe = nodesMap.onDeepChange((changes) => {
+		for (const change of changes) {
+			// change.path format: [nodeId, 'parameters', ...nestedPath]
+			// We only care about parameter changes
+			const nodeId = change.path[0];
+			if (typeof nodeId !== 'string') continue;
+
+			// Check if this change is in the parameters subtree
+			if (change.path.length >= 2 && change.path[1] === 'parameters') {
+				pendingNodeIds.add(nodeId);
+			}
+		}
+
+		// Debounce resolution (multiple parameter changes might come together)
+		if (pendingNodeIds.size > 0 && !resolveTimeout) {
+			resolveTimeout = setTimeout(() => {
+				for (const nodeId of pendingNodeIds) {
+					resolveNodeExpressions(state, docState, execDocState, nodeId);
+				}
+				pendingNodeIds = new Set();
+				resolveTimeout = null;
+
+				// Broadcast the execution doc update to subscribed tabs
+				const execDocId = `exec-${execDocState.workflowId}`;
+				const update = execDocState.doc.encodeState();
+				state.crdtSubscriptions.forEach((subscription) => {
+					if (subscription.docIds.has(execDocId)) {
+						sendToTab(subscription.crdtPort, MESSAGE_SYNC, execDocId, update);
+					}
+				});
+			}, 10); // Small delay to batch rapid changes
+		}
+	});
+
+	return () => {
+		unsubscribe();
+		if (resolveTimeout) {
+			clearTimeout(resolveTimeout);
+		}
+	};
+}
+
+// =============================================================================
 // Document Seeding
 // =============================================================================
 
@@ -788,6 +852,11 @@ async function seedDocument(
 			setNestedValue as SetNestedValueFn,
 		);
 
+		// Set up expression resolution on parameter changes
+		// When node parameters change, re-resolve expressions for that node
+		const execDocState = getOrCreateExecutionDoc(state, docId);
+		const expressionResolutionUnsub = setupExpressionResolution(state, docState, execDocState);
+
 		// Store handle observer unsub for cleanup
 		docState.handleObserverUnsub = handleUnsub;
 
@@ -800,6 +869,7 @@ async function seedDocument(
 		const unsubscribe = () => {
 			syncUnsub();
 			expressionUnsub();
+			expressionResolutionUnsub();
 			updateUnsub();
 		};
 
@@ -814,6 +884,19 @@ async function seedDocument(
 		);
 
 		docState.seeded = true;
+
+		// Initial expression resolution for all nodes
+		// Uses pinned data as execution context (before actual execution)
+		resolveAllNodeExpressions(state, docState, execDocState);
+
+		// Broadcast the execution doc to all subscribed tabs so they can see resolved expressions
+		const execDocId = `exec-${docId}`;
+		const update = execDocState.doc.encodeState();
+		state.crdtSubscriptions.forEach((subscription) => {
+			if (subscription.docIds.has(execDocId)) {
+				sendToTab(subscription.crdtPort, MESSAGE_SYNC, execDocId, update);
+			}
+		});
 	} catch {
 		// Failed to seed document
 	}

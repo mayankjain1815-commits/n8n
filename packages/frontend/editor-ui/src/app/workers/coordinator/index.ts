@@ -166,5 +166,24 @@ export async function executeWorkflow(
 	return await coordinator.executeWorkflow(workflowId, baseUrl, triggerNodeName);
 }
 
+/**
+ * Resolve an expression for autocomplete purposes.
+ *
+ * The Coordinator has the synced Workflow instance and execution data.
+ * This function resolves arbitrary expressions on-demand for autocomplete.
+ *
+ * @param workflowId - The workflow ID
+ * @param expression - The expression to resolve (e.g., "={{ $json }}")
+ * @param nodeName - The node context for resolution
+ * @returns The resolved value, or null if resolution fails
+ */
+export async function resolveExpression(
+	workflowId: string,
+	expression: string,
+	nodeName: string,
+): Promise<unknown> {
+	return await coordinator.resolveExpression(workflowId, expression, nodeName);
+}
+
 // Re-export types
 export type { CoordinatorApi } from './worker';

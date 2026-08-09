@@ -21,6 +21,7 @@ import {
 import {
 	ARRAY_NUMBER_ONLY_METHODS,
 	ARRAY_RECOMMENDED_OPTIONS,
+	CRDT_AUTOCOMPLETE_RESOLVER_FACET,
 	FIELDS_SECTION,
 	LUXON_RECOMMENDED_OPTIONS,
 	LUXON_SECTIONS,
@@ -57,6 +58,7 @@ import {
 	longestCommonPrefix,
 	prefixMatch,
 	resolveAutocompleteExpression,
+	resolveAutocompleteExpressionAsync,
 	sortCompletionsAlpha,
 	splitBaseTail,
 	stripExcessParens,
@@ -67,9 +69,13 @@ import type { TargetNodeParameterContext } from '@/Interface';
 
 /**
  * Resolution-based completions offered according to datatype.
+ * Supports async resolution when CRDT mode is active.
  */
-export function datatypeCompletions(context: CompletionContext): CompletionResult | null {
+export async function datatypeCompletions(
+	context: CompletionContext,
+): Promise<CompletionResult | null> {
 	const targetNodeParameterContext = context.state.facet(TARGET_NODE_PARAMETER_FACET);
+	const crdtResolver = context.state.facet(CRDT_AUTOCOMPLETE_RESOLVER_FACET);
 	const word = context.matchBefore(DATATYPE_REGEX);
 
 	if (!word) return null;
@@ -94,23 +100,40 @@ export function datatypeCompletions(context: CompletionContext): CompletionResul
 	} else if (base === '$secrets' && isCredential) {
 		options = secretProvidersOptions();
 	} else {
-		const resolved = attempt(
-			(): Resolved =>
-				resolveAutocompleteExpression(`={{ ${base} }}`, targetNodeParameterContext?.nodeName),
-			(error) => {
-				if (!isPairedItemIntermediateNodesError(error)) {
-					return null;
-				}
+		// Use async resolution when CRDT resolver is available
+		let resolved: Resolved | null = null;
 
-				// Fallback on first item to provide autocomplete when intermediate nodes have not run
-				return attempt(() =>
-					resolveAutocompleteExpression(
-						`={{ ${expressionWithFirstItem(syntaxTree, base)} }}`,
-						targetNodeParameterContext?.nodeName,
-					),
-				);
-			},
-		);
+		if (crdtResolver) {
+			// CRDT mode: use async resolution via coordinator
+			try {
+				resolved = (await resolveAutocompleteExpressionAsync(
+					`={{ ${base} }}`,
+					targetNodeParameterContext?.nodeName,
+					crdtResolver,
+				)) as Resolved;
+			} catch {
+				resolved = null;
+			}
+		} else {
+			// Standard mode: use synchronous store-based resolution
+			resolved = attempt(
+				(): Resolved =>
+					resolveAutocompleteExpression(`={{ ${base} }}`, targetNodeParameterContext?.nodeName),
+				(error) => {
+					if (!isPairedItemIntermediateNodesError(error)) {
+						return null;
+					}
+
+					// Fallback on first item to provide autocomplete when intermediate nodes have not run
+					return attempt(() =>
+						resolveAutocompleteExpression(
+							`={{ ${expressionWithFirstItem(syntaxTree, base)} }}`,
+							targetNodeParameterContext?.nodeName,
+						),
+					);
+				},
+			);
+		}
 
 		if (resolved === null) return null;
 

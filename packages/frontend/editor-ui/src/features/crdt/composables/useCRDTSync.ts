@@ -219,7 +219,22 @@ export function useCRDTSync(options: UseCRDTSyncOptions): UseCRDTSyncReturn {
 		switch (messageType) {
 			case MESSAGE_SYNC:
 				if (payload.length > 0) {
+					console.log(
+						'[useCRDTSync] Received MESSAGE_SYNC for docId:',
+						docId,
+						'payload size:',
+						payload.length,
+					);
 					currentDoc.applyUpdate(payload);
+					// Check resolvedParams after applying update
+					const resolvedParamsMap = currentDoc.getMap('resolvedParams');
+					console.log(
+						'[useCRDTSync] After applyUpdate, resolvedParams size:',
+						resolvedParamsMap.size,
+					);
+					for (const [key, value] of resolvedParamsMap.entries()) {
+						console.log('[useCRDTSync] resolvedParams entry:', key, value);
+					}
 					// For WebSocket transport, mark synced on first sync message
 					// (Worker transport sends explicit MESSAGE_INITIAL_SYNC)
 					if (transportType === 'websocket' && !currentDoc.synced) {
