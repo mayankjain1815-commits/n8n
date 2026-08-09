@@ -342,6 +342,7 @@ export class WorkflowRunner {
 					if (workflowExecution.isCanceled) {
 						fullRunData.finished = false;
 					}
+
 					this.activeExecutions.resolveExecutionResponsePromise(executionId);
 					this.activeExecutions.finalizeExecution(executionId, fullRunData);
 				})
