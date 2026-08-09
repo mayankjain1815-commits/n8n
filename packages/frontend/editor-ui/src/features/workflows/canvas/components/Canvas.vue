@@ -1172,19 +1172,19 @@ defineExpose({
 			</div>
 		</Transition>
 		-->
+		<div
+			v-show="isDraggingFile"
+			:class="$style.fileDragGhost"
+			:style="{ top: `${fileDragPosition.y}px`, left: `${fileDragPosition.x}px` }"
+		>
+			<NodeIcon
+				:icon-source="{ type: 'icon', name: 'file' }"
+				:size="40"
+				:shrink="false"
+				color-default="var(--color--foreground--shade-2)"
+			/>
+		</div>
 	</VueFlow>
-	<div
-		v-show="isDraggingFile"
-		:class="$style.fileDragGhost"
-		:style="{ top: `${fileDragPosition.y}px`, left: `${fileDragPosition.x}px` }"
-	>
-		<NodeIcon
-			:icon-source="{ type: 'icon', name: 'file' }"
-			:size="40"
-			:shrink="false"
-			color-default="var(--color--foreground--shade-2)"
-		/>
-	</div>
 </template>
 
 <style lang="scss" module>

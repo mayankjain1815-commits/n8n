@@ -22,12 +22,20 @@ export class FileData implements INodeType {
 		outputs: [NodeConnectionTypes.Main],
 		properties: [
 			{
+				displayName:
+					'This node provides access to file data uploaded via the Drag and Drop upload feature.',
+				name: 'notice',
+				type: 'notice',
+				default: '',
+			},
+			{
 				displayName: 'File ID',
 				name: 'fileId',
 				type: 'string',
 				default: '',
 				required: true,
 				description: 'The ID of the uploaded file in binary data storage',
+				isNodeSetting: true,
 			},
 			{
 				displayName: 'File Name',
