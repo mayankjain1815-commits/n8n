@@ -1,3 +1,12 @@
+## [2.7.1](https://github.com/n8n-io/n8n/compare/n8n@2.7.0...n8n@2.7.1) (2026-02-03)
+
+
+### Bug Fixes
+
+* **editor:** Sidebar labels are not visible ([#25186](https://github.com/n8n-io/n8n/issues/25186)) ([0e33eba](https://github.com/n8n-io/n8n/commit/0e33eba08bc7b8aabd0c9a61754ad83739ab3074))
+
+
+
 # [2.7.0](https://github.com/n8n-io/n8n/compare/n8n@2.6.0...n8n@2.7.0) (2026-02-02)
 
 
