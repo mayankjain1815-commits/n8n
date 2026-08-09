@@ -437,6 +437,17 @@ export function useCRDTSync(options: UseCRDTSyncOptions): UseCRDTSyncReturn {
 	 * Disconnect and cleanup.
 	 */
 	function disconnect(): void {
+		// Destroy awareness FIRST while transport is still connected
+		// This sends the awareness removal update to the SharedWorker
+		if (currentAwareness) {
+			currentAwareness.destroy();
+			currentAwareness = null;
+		}
+
+		// Now unsubscribe from awareness updates (after destroy sent the removal)
+		unsubscribeAwareness?.();
+		unsubscribeAwareness = null;
+
 		// Disconnect transport (sends UNSUBSCRIBE message)
 		transport?.disconnect();
 		transport = null;
@@ -450,20 +461,12 @@ export function useCRDTSync(options: UseCRDTSyncOptions): UseCRDTSyncReturn {
 		unsubscribeDoc?.();
 		unsubscribeDoc = null;
 
-		unsubscribeAwareness?.();
-		unsubscribeAwareness = null;
-
 		unsubscribeUndoStackChange?.();
 		unsubscribeUndoStackChange = null;
 
 		if (currentUndoManager) {
 			currentUndoManager.destroy();
 			currentUndoManager = null;
-		}
-
-		if (currentAwareness) {
-			currentAwareness.destroy();
-			currentAwareness = null;
 		}
 
 		if (currentDoc) {

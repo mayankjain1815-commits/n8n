@@ -99,15 +99,43 @@ export function initializeCrdtSubscription(
 	state.crdtSubscriptions.set(tabId, {
 		docIds: new Set(),
 		crdtPort,
+		clientIdsByDoc: new Map(),
 	});
 }
 
 /**
- * Clean up CRDT subscription when tab disconnects
+ * Clean up CRDT subscription when tab disconnects.
+ * Removes awareness states for any clientIds that were associated with this tab,
+ * which handles page refresh and unexpected disconnects.
  */
 export function cleanupCrdtSubscription(state: CoordinatorState, tabId: string): void {
 	const subscription = state.crdtSubscriptions.get(tabId);
-	if (!subscription) return;
+	if (!subscription) {
+		return;
+	}
+
+	// Remove awareness states for this tab's clientIds (handles page refresh)
+	subscription.clientIdsByDoc.forEach((clientIds: Set<number>, docId: string) => {
+		if (clientIds.size > 0) {
+			const docState = state.crdtDocuments.get(docId);
+			if (docState) {
+				const awareness = docState.doc.getAwareness();
+				const clientIdsArray = Array.from(clientIds);
+
+				// Remove the states from awareness (generates removal update)
+				awareness.removeStates(clientIdsArray);
+
+				// Encode the removal update and broadcast to remaining tabs
+				const removalUpdate = awareness.encodeState(clientIdsArray);
+				broadcastToSubscribedTabs(state, docId, MESSAGE_AWARENESS, removalUpdate, tabId);
+
+				// Send to server if in server mode
+				if (docState.serverMode && docState.serverTransport?.connected) {
+					docState.serverTransport.send(encodeMessage(MESSAGE_AWARENESS, removalUpdate));
+				}
+			}
+		}
+	});
 
 	// Unsubscribe from all documents
 	for (const docId of subscription.docIds) {
@@ -563,19 +591,35 @@ function unsubscribeFromDocument(state: CoordinatorState, tabId: string, docId: 
 
 	// Clean up document if no subscribers
 	if (!hasSubscribers) {
-		const docState = state.crdtDocuments.get(docId);
-		if (docState?.serverMode) {
-			// SERVER MODE: No final save needed, server handles persistence
-			cleanupDocument(state, docId);
-		} else if (docState?.room) {
-			// WORKER MODE: Trigger final save via room, then cleanup
-			void docState.room.finalSave().finally(() => {
-				cleanupDocument(state, docId);
-			});
+		if (docId.startsWith('exec-')) {
+			// EXECUTION DOC: Clean up execution document
+			cleanupExecutionDocument(state, docId);
 		} else {
-			cleanupDocument(state, docId);
+			const docState = state.crdtDocuments.get(docId);
+			if (docState?.serverMode) {
+				// SERVER MODE: No final save needed, server handles persistence
+				cleanupDocument(state, docId);
+			} else if (docState?.room) {
+				// WORKER MODE: Trigger final save via room, then cleanup
+				void docState.room.finalSave().finally(() => {
+					cleanupDocument(state, docId);
+				});
+			} else {
+				cleanupDocument(state, docId);
+			}
 		}
 	}
+}
+
+/**
+ * Clean up an execution document when no tabs are subscribed.
+ */
+function cleanupExecutionDocument(state: CoordinatorState, docId: string): void {
+	const execDocState = state.crdtExecutionDocuments.get(docId);
+	if (!execDocState) return;
+
+	execDocState.doc.destroy();
+	state.crdtExecutionDocuments.delete(docId);
 }
 
 /**
@@ -642,30 +686,55 @@ function handleSyncMessage(
  * Handle AWARENESS message from a tab.
  * In server mode, forward to server AND broadcast to tabs.
  * In worker mode, apply locally and broadcast.
+ *
+ * Also tracks clientIds per tab subscription for cleanup on disconnect.
  */
 function handleAwarenessMessage(
 	state: CoordinatorState,
-	_tabId: string,
+	tabId: string,
 	docId: string,
 	payload: Uint8Array,
 ): void {
 	const docState = state.crdtDocuments.get(docId);
 	if (!docState) return;
 
+	const subscription = state.crdtSubscriptions.get(tabId);
+	const awareness = docState.doc.getAwareness();
+
+	// Track clientIds from this tab for cleanup on disconnect
+	// Set up one-time listener BEFORE applying update to capture the changes
+	if (subscription) {
+		const unsubscribe = awareness.onChange((event) => {
+			unsubscribe(); // Only capture this one update
+
+			// Get or create clientIds set for this doc
+			let clientIds = subscription.clientIdsByDoc.get(docId);
+			if (!clientIds) {
+				clientIds = new Set<number>();
+				subscription.clientIdsByDoc.set(docId, clientIds);
+			}
+
+			// Track added/updated clientIds, remove removed ones
+			for (const id of event.added) clientIds.add(id);
+			for (const id of event.updated) clientIds.add(id);
+			for (const id of event.removed) clientIds.delete(id);
+		});
+
+		// Apply the update (triggers the onChange listener)
+		awareness.applyUpdate(payload);
+	} else {
+		// No subscription to track, just apply
+		awareness.applyUpdate(payload);
+	}
+
 	if (docState.serverMode && docState.serverTransport?.connected) {
 		// SERVER MODE: Forward to server AND broadcast to tabs
 		// The server broadcasts to "other clients" but the coordinator is the only client,
 		// so we handle cross-tab awareness directly.
-		const awareness = docState.doc.getAwareness();
-		awareness.applyUpdate(payload);
 		docState.serverTransport.send(encodeMessage(MESSAGE_AWARENESS, payload));
 		broadcastToSubscribedTabs(state, docId, MESSAGE_AWARENESS, payload);
 	} else {
-		// WORKER MODE: Apply locally and broadcast
-		const awareness = docState.doc.getAwareness();
-		awareness.applyUpdate(payload);
-
-		// Broadcast to ALL tabs (including sender) to support split-view within the same tab.
+		// WORKER MODE: Broadcast to ALL tabs (including sender) to support split-view.
 		// Each view has a unique awareness clientId, so echoing back is safe - views filter
 		// out their own clientId when rendering collaborators, and the origin tracking in
 		// useCRDTSync prevents re-sending (only local changes are sent to the coordinator).

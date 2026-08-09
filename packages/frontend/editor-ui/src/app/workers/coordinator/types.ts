@@ -30,6 +30,8 @@ export interface CRDTSubscription {
 	docIds: Set<string>;
 	/** Dedicated port for CRDT binary messages */
 	crdtPort: MessagePort;
+	/** Awareness clientIds per docId - for cleanup on disconnect */
+	clientIdsByDoc: Map<string, Set<number>>;
 }
 
 /**

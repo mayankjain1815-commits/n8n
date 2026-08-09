@@ -91,6 +91,8 @@ const coordinatorApi = {
 	 * Unregister a tab when it closes
 	 */
 	async unregisterTab(tabId: string): Promise<void> {
+		// Clean up CRDT subscriptions first (unsubscribes from all documents)
+		cleanupCrdtSubscription(state, tabId);
 		unregisterTabOp(state, tabId);
 	},
 

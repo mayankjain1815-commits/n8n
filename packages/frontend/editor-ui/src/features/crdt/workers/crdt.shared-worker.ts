@@ -331,7 +331,6 @@ function handleBinaryMessage(
 			// For local-only docs (no serverUrl), mark as ready immediately
 			if (!serverUrl) {
 				sendToTab(port, MESSAGE_INITIAL_SYNC, docId);
-				console.log('[CRDT SharedWorker] Tab subscribed to local-only document:', docId);
 				break;
 			}
 
@@ -347,7 +346,6 @@ function handleBinaryMessage(
 				}
 			}
 
-			console.log('[CRDT SharedWorker] Tab subscribed to document:', docId);
 			break;
 		}
 
@@ -365,11 +363,9 @@ function handleBinaryMessage(
 					docState.unsubscribeTransport?.();
 					docState.doc.destroy();
 					documents.delete(docId);
-					console.log('[CRDT SharedWorker] Document cleaned up:', docId);
 				}
 			}
 
-			console.log('[CRDT SharedWorker] Tab unsubscribed from document:', docId);
 			break;
 		}
 
@@ -388,10 +384,6 @@ function handleBinaryMessage(
 				docState.serverTransport.send(encodeMessage(MESSAGE_SYNC, payload));
 			}
 
-			console.log('[CRDT SharedWorker] Applied update from tab:', {
-				docId,
-				size: payload.length,
-			});
 			break;
 		}
 
@@ -411,13 +403,33 @@ function handleBinaryMessage(
 				docState.serverTransport.send(encodeMessage(MESSAGE_AWARENESS, payload));
 			}
 
-			console.log('[CRDT SharedWorker] Applied awareness update from tab:', {
-				docId,
-				size: payload.length,
-			});
 			break;
 		}
 	}
+}
+
+/**
+ * Handle cleanup when a tab disconnects (port closes).
+ */
+function handleTabDisconnect(port: MessagePort, tabConnection: TabConnection): void {
+	// Remove tab from all documents it was subscribed to
+	for (const docId of tabConnection.docIds) {
+		const docState = documents.get(docId);
+		if (docState) {
+			docState.tabs.delete(tabConnection);
+
+			// If no more tabs are subscribed, clean up
+			if (docState.tabs.size === 0) {
+				docState.serverTransport?.disconnect();
+				docState.unsubscribeDoc?.();
+				docState.unsubscribeTransport?.();
+				docState.doc.destroy();
+				documents.delete(docId);
+			}
+		}
+	}
+
+	tabs.delete(port);
 }
 
 /**
@@ -466,12 +478,11 @@ function handleTabConnect(port: MessagePort): void {
 
 	port.onmessageerror = (event) => {
 		console.error('[CRDT SharedWorker] Message error:', event);
+		handleTabDisconnect(port, tabConnection);
 	};
 
 	// Start receiving messages
 	port.start();
-
-	console.log('[CRDT SharedWorker] Tab connected');
 }
 
 // Handle new connections

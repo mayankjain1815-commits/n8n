@@ -88,11 +88,6 @@ export function resolveNodeExpressions(
 		// Resolve the expression
 		const resolvedValue = resolveExpression(workflow, node, value as string, runData, pinData);
 
-		console.log('[CRDT resolveNodeExpressions] Setting resolved value:', {
-			key,
-			state: resolvedValue.state,
-			resolved: resolvedValue.resolved,
-		});
 		resolvedParamsMap.set(key, resolvedValue);
 	});
 
@@ -118,37 +113,15 @@ function resolveExpression(
 	runData: IRunData | null,
 	pinData: IPinData | null,
 ): ResolvedValue {
-	// DEBUG: Log inputs
-	console.log('[CRDT resolveExpression] START', {
-		nodeName: node.name,
-		expression,
-		hasRunData: !!runData,
-		runDataKeys: runData ? Object.keys(runData) : [],
-		hasPinData: !!pinData,
-		pinDataKeys: pinData ? Object.keys(pinData) : [],
-	});
-
 	try {
 		// Build connection input data from run data or pin data
 		const connectionInputData = getConnectionInputData(workflow, node, runData, pinData);
-		console.log('[CRDT resolveExpression] connectionInputData length:', connectionInputData.length);
 
 		// Build run execution data structure if we have run data
 		const runExecutionData = runData ? createRunExecutionData({ resultData: { runData } }) : null;
-		console.log('[CRDT resolveExpression] runExecutionData:', {
-			hasRunExecutionData: !!runExecutionData,
-			runDataInExec: runExecutionData?.resultData?.runData
-				? Object.keys(runExecutionData.resultData.runData)
-				: [],
-		});
 
 		// Build executeData with source info (CRITICAL for $() expressions)
 		const executeData = buildExecuteData(workflow, node, runData, pinData);
-		console.log('[CRDT resolveExpression] executeData:', {
-			hasNode: !!executeData.node,
-			dataKeys: Object.keys(executeData.data),
-			source: executeData.source,
-		});
 
 		// Add basic additional keys (minimal set needed for expressions)
 		const additionalKeys: IWorkflowDataProxyAdditionalKeys = {
@@ -174,7 +147,6 @@ function resolveExpression(
 			executeData,
 		);
 
-		console.log('[CRDT resolveExpression] SUCCESS:', resolved);
 		return {
 			expression,
 			resolved,
@@ -184,13 +156,6 @@ function resolveExpression(
 	} catch (error) {
 		const state = getErrorState(error);
 		const errorMessage = getExpressionErrorMessage(error);
-		console.log('[CRDT resolveExpression] ERROR:', {
-			message: errorMessage,
-			state,
-			errorType: error instanceof ExpressionError ? error.context?.type : 'unknown',
-			fullContext: error instanceof ExpressionError ? error.context : undefined,
-			stack: error instanceof Error ? error.stack?.split('\n').slice(0, 5).join('\n') : undefined,
-		});
 		return {
 			expression,
 			resolved: null,
@@ -322,73 +287,20 @@ function findNodeById(workflow: Workflow, nodeId: string): INode | undefined {
  */
 function getRunDataFromExecDoc(execDocState: CRDTExecutionDocumentState): IRunData | null {
 	const runDataMap = execDocState.doc.getMap('runData');
-	console.log('[CRDT getRunDataFromExecDoc] runDataMap size:', runDataMap.size);
 
 	const runData: IRunData = {};
 	for (const [nodeName, nodeRuns] of runDataMap.entries()) {
-		console.log(
-			'[CRDT getRunDataFromExecDoc] processing node:',
-			nodeName,
-			'type:',
-			typeof nodeRuns,
-		);
 		if (nodeRuns && typeof nodeRuns === 'object' && 'toArray' in nodeRuns) {
 			// It's a CRDT array
 			const array = (nodeRuns as { toArray(): unknown[] }).toArray();
-			console.log('[CRDT getRunDataFromExecDoc] node', nodeName, 'has', array.length, 'runs');
 			runData[nodeName] = array.map((item) =>
 				typeof item === 'object' && item !== null && 'toJSON' in item
 					? (item as { toJSON(): unknown }).toJSON()
 					: item,
 			) as IRunData[string];
-
-			// Log first run's data structure
-			if (runData[nodeName]?.[0]) {
-				const run0 = runData[nodeName][0];
-				console.log(
-					'[CRDT getRunDataFromExecDoc] node',
-					nodeName,
-					'run[0] keys:',
-					Object.keys(run0),
-				);
-				console.log(
-					'[CRDT getRunDataFromExecDoc] node',
-					nodeName,
-					'run[0].data:',
-					run0.data ? 'present' : 'missing',
-				);
-				if (run0.data) {
-					console.log(
-						'[CRDT getRunDataFromExecDoc] node',
-						nodeName,
-						'run[0].data keys:',
-						Object.keys(run0.data),
-					);
-					if (run0.data.main) {
-						console.log(
-							'[CRDT getRunDataFromExecDoc] node',
-							nodeName,
-							'run[0].data.main length:',
-							run0.data.main.length,
-						);
-						if (run0.data.main[0]) {
-							console.log(
-								'[CRDT getRunDataFromExecDoc] node',
-								nodeName,
-								'run[0].data.main[0] length:',
-								run0.data.main[0].length,
-							);
-						}
-					}
-				}
-			}
 		}
 	}
 
-	console.log(
-		'[CRDT getRunDataFromExecDoc] result:',
-		Object.keys(runData).length > 0 ? Object.keys(runData) : 'null',
-	);
 	return Object.keys(runData).length > 0 ? runData : null;
 }
 
