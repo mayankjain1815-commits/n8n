@@ -20,6 +20,10 @@ describe('Ftp', () => {
 		executeFunctions.helpers.constructExecutionMetaData.mockImplementation(
 			(data) => data as NodeExecutionWithMetadata[],
 		);
+		executeFunctions.getNode.mockReturnValue({
+			type: 'n8n-nodes-base.ftp',
+			name: 'FTP',
+		} as any);
 	});
 
 	it('should add timeout option with ftp', async () => {
