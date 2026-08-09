@@ -26,14 +26,16 @@ import { createInfoBoxRenderer } from './infoBoxRenderer';
 /**
  * Completions offered at the dollar position: `$|`
  */
-export function dollarCompletions(context: CompletionContext): CompletionResult | null {
+export async function dollarCompletions(
+	context: CompletionContext,
+): Promise<CompletionResult | null> {
 	const word = context.matchBefore(/\$[^$]*/);
 
 	if (!word) return null;
 
 	if (word.from === word.to && !context.explicit) return null;
 
-	let options = dollarOptions(context).map(stripExcessParens(context));
+	let options = (await dollarOptions(context)).map(stripExcessParens(context));
 
 	const userInput = word.text;
 
@@ -55,7 +57,7 @@ export function dollarCompletions(context: CompletionContext): CompletionResult 
 	};
 }
 
-export function dollarOptions(context: CompletionContext): Completion[] {
+export async function dollarOptions(context: CompletionContext): Promise<Completion[]> {
 	const SKIP = new Set();
 	let recommendedCompletions: Completion[] = [];
 
@@ -132,7 +134,7 @@ export function dollarOptions(context: CompletionContext): Completion[] {
 
 	// In CRDT mode, skip binary check (would need async resolution)
 	// In standard mode, check if node receives binary data
-	if (!isCrdtMode && receivesNoBinaryData(targetNodeParameterContext?.nodeName)) {
+	if (!isCrdtMode && (await receivesNoBinaryData(targetNodeParameterContext?.nodeName))) {
 		SKIP.add('$binary');
 	}
 
