@@ -121,6 +121,50 @@ const timeoutOption: INodeProperties = {
 	default: 10000,
 };
 
+/**
+ * Parse comma-separated algorithm string into array
+ */
+function parseAlgorithmList(value: string | undefined): string[] | undefined {
+	if (!value || value.trim() === '') {
+		return undefined;
+	}
+	return value
+		.split(',')
+		.map((algo) => algo.trim())
+		.filter((algo) => algo !== '');
+}
+
+/**
+ * Build algorithms object from SFTP credentials
+ */
+function buildAlgorithmsConfig(credentials: ICredentialDataDecryptedObject): any {
+	const algorithms: {
+		compress?: string[];
+		cipher?: string[];
+		hmac?: string[];
+		kex?: string[];
+		serverHostKey?: string[];
+	} = {};
+
+	const compression = parseAlgorithmList(credentials.algorithmsCompression as string);
+	if (compression) algorithms.compress = compression;
+
+	const ciphers = parseAlgorithmList(credentials.algorithmsCiphers as string);
+	if (ciphers) algorithms.cipher = ciphers;
+
+	const hmac = parseAlgorithmList(credentials.algorithmsHmac as string);
+	if (hmac) algorithms.hmac = hmac;
+
+	const kex = parseAlgorithmList(credentials.algorithmsKex as string);
+	if (kex) algorithms.kex = kex;
+
+	const serverHostKey = parseAlgorithmList(credentials.algorithmsServerHostKey as string);
+	if (serverHostKey) algorithms.serverHostKey = serverHostKey;
+
+	// Only return if at least one algorithm category is configured
+	return Object.keys(algorithms).length > 0 ? algorithms : undefined;
+}
+
 export class Ftp implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'FTP',
@@ -552,6 +596,7 @@ export class Ftp implements INodeType {
 			): Promise<INodeCredentialTestResult> {
 				const credentials = credential.data as ICredentialDataDecryptedObject;
 				const sftp = new sftpClient();
+				const algorithmsConfig = buildAlgorithmsConfig(credentials);
 				try {
 					if (credentials.privateKey) {
 						await sftp.connect({
@@ -561,6 +606,7 @@ export class Ftp implements INodeType {
 							password: (credentials.password as string) || undefined,
 							privateKey: formatPrivateKey(credentials.privateKey as string),
 							passphrase: credentials.passphrase as string | undefined,
+							algorithms: algorithmsConfig,
 						});
 					} else {
 						await sftp.connect({
@@ -568,6 +614,7 @@ export class Ftp implements INodeType {
 							port: credentials.port as number,
 							username: credentials.username as string,
 							password: credentials.password as string,
+							algorithms: algorithmsConfig,
 						});
 					}
 				} catch (error) {
@@ -608,6 +655,7 @@ export class Ftp implements INodeType {
 			try {
 				if (protocol === 'sftp') {
 					sftp = new sftpClient();
+					const algorithmsConfig = buildAlgorithmsConfig(credentials);
 					if (credentials.privateKey) {
 						await sftp.connect({
 							host: credentials.host as string,
@@ -617,7 +665,7 @@ export class Ftp implements INodeType {
 							privateKey: formatPrivateKey(credentials.privateKey as string),
 							passphrase: credentials.passphrase as string | undefined,
 							readyTimeout: connectionTimeout,
-							algorithms: {
+							algorithms: algorithmsConfig || {
 								compress: ['zlib@openssh.com', 'zlib', 'none'],
 							},
 						});
@@ -628,7 +676,7 @@ export class Ftp implements INodeType {
 							username: credentials.username as string,
 							password: credentials.password as string,
 							readyTimeout: connectionTimeout,
-							algorithms: {
+							algorithms: algorithmsConfig || {
 								compress: ['zlib@openssh.com', 'zlib', 'none'],
 							},
 						});
