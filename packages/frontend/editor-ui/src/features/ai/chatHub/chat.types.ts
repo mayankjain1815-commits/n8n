@@ -10,9 +10,9 @@ import {
 	chatHubConversationModelSchema,
 	type ChatModelDto,
 	agentIconOrEmojiSchema,
+	z,
 } from '@n8n/api-types';
 import type { IBinaryData, INode } from 'n8n-workflow';
-import { z } from 'zod';
 import { isLlmProviderModel } from './chat.utils';
 
 export interface UserMessage {
@@ -46,7 +46,8 @@ export type MessagingState =
 	| 'waitingFirstChunk'
 	| 'receiving'
 	| 'missingCredentials'
-	| 'missingAgent';
+	| 'missingAgent'
+	| 'waitingForApproval';
 
 export interface ChatMessage extends ChatHubMessageDto {
 	responses: ChatMessageId[];

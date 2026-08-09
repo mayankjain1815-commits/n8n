@@ -232,6 +232,7 @@ describe('FrontendService', () => {
 					},
 				},
 				authCookie: { secure: false },
+				communityNodesEnabled: false,
 				previewMode: false,
 				enterprise: { saml: false, ldap: false, oidc: false },
 			};
@@ -260,6 +261,7 @@ describe('FrontendService', () => {
 					},
 				},
 				authCookie: { secure: false },
+				communityNodesEnabled: false,
 				previewMode: false,
 				enterprise: { saml: false, ldap: false, oidc: false },
 				mfa: {
@@ -272,6 +274,16 @@ describe('FrontendService', () => {
 			const settings = await service.getPublicSettings(true);
 
 			expect(settings).toEqual(expectedPublicSettings);
+		});
+
+		it('should set showSetupOnFirstLoad to false in preview mode', async () => {
+			process.env.N8N_PREVIEW_MODE = 'true';
+
+			const { service } = createMockService();
+			const settings = await service.getPublicSettings(false);
+
+			expect(settings.previewMode).toBe(true);
+			expect(settings.userManagement.showSetupOnFirstLoad).toBe(false);
 		});
 	});
 

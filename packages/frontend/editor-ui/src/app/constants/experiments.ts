@@ -49,6 +49,8 @@ export const AI_BUILDER_TEMPLATE_EXAMPLES_EXPERIMENT = createExperiment(
 	'056_ai_builder_template_examples',
 );
 
+export const AI_BUILDER_PLAN_MODE_EXPERIMENT = createExperiment('073_builder_plan_mode');
+
 export const EXECUTION_LOGIC_V2_EXPERIMENT = {
 	name: '062_execution_logic_v2',
 	control: 'control',
@@ -70,6 +72,17 @@ export const EMPTY_STATE_EXPERIMENT = createExperiment('070_empty_screen_layout'
 	variantTemplates: 'variant-templates',
 });
 
+export const SETUP_PANEL = createExperiment('069_setup_panel', {
+	control: 'control',
+	variant: 'variant',
+});
+
+export const QUICK_CONNECT_EXPERIMENT = {
+	name: '073_quick_connect',
+	control: 'control',
+	variant: 'variant',
+};
+
 export const EXPERIMENTS_TO_TRACK = [
 	EXTRA_TEMPLATE_LINKS_EXPERIMENT.name,
 	TEMPLATE_ONBOARDING_EXPERIMENT.name,
@@ -77,6 +90,7 @@ export const EXPERIMENTS_TO_TRACK = [
 	TEMPLATE_RECO_V2.name,
 	READY_TO_RUN_V2_P3_EXPERIMENT.name,
 	AI_BUILDER_TEMPLATE_EXAMPLES_EXPERIMENT.name,
+	AI_BUILDER_PLAN_MODE_EXPERIMENT.name,
 	TEMPLATE_SETUP_EXPERIENCE.name,
 	RESOURCE_CENTER_EXPERIMENT.name,
 	EXECUTION_LOGIC_V2_EXPERIMENT.name,
@@ -84,4 +98,5 @@ export const EXPERIMENTS_TO_TRACK = [
 	TAMPER_PROOF_INVITE_LINKS.name,
 	SIDEBAR_EXPANDED_EXPERIMENT.name,
 	EMPTY_STATE_EXPERIMENT.name,
+	SETUP_PANEL.name,
 ];
