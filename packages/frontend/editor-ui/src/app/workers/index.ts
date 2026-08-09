@@ -25,10 +25,17 @@ async function ensureRegistered(): Promise<void> {
  * This will route to the active tab's data worker
  *
  * @param options.version - The current n8n version from settings
+ * @param options.baseUrl - The base URL for REST API calls (e.g., http://localhost:5678)
  */
-export async function initialize({ version }: { version: string }): Promise<void> {
+export async function initialize({
+	version,
+	baseUrl,
+}: {
+	version: string;
+	baseUrl: string;
+}): Promise<void> {
 	await ensureRegistered();
-	await coordinator.initialize({ version });
+	await coordinator.initialize({ version, baseUrl });
 }
 
 /**

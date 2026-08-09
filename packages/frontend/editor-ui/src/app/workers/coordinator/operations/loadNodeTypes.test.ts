@@ -47,6 +47,7 @@ describe('Coordinator loadNodeTypes Operation', () => {
 			version: null,
 			crdtSubscriptions: new Map(),
 			crdtDocuments: new Map(),
+			crdtExecutionDocuments: new Map(),
 			crdtProvider: null,
 			...overrides,
 		};

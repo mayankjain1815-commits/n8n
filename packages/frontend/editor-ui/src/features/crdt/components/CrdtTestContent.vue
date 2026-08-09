@@ -21,16 +21,52 @@ import { NodeConnectionTypes, NodeHelpers } from 'n8n-workflow';
 import { provide, ref } from 'vue';
 import { useWorkflowAwareness } from '../composables/useWorkflowAwareness';
 import { useWorkflowDoc } from '../composables/useWorkflowSync';
+import { useExecutionDoc } from '../composables/useExecutionDoc';
 import { WorkflowAwarenessKey } from '../types/awareness.types';
 import type { WorkflowEdge, WorkflowNode } from '../types/workflowDocument.types';
 import CrdtNodeDetailsPanel from './CrdtNodeDetailsPanel.vue';
 import CrdtPinnedDataTestPanel from './CrdtPinnedDataTestPanel.vue';
 import WorkflowCanvas from './WorkflowCanvas.vue';
+import { executeWorkflow } from '@/app/workers/coordinator';
+import { useRootStore } from '@n8n/stores/useRootStore';
 
 const doc = useWorkflowDoc();
 // Create awareness at the parent level and provide for children
 const awareness = useWorkflowAwareness({ awareness: doc.awareness });
 provide(WorkflowAwarenessKey, awareness);
+
+// Create execution document and provide for children (nodes/edges)
+const executionDoc = useExecutionDoc({ workflowId: doc.workflowId, immediate: true });
+provide('executionDoc', executionDoc);
+
+const rootStore = useRootStore();
+
+// Track execution state
+const isExecuting = ref(false);
+
+/**
+ * Execute the workflow via the Coordinator.
+ * The Coordinator has the up-to-date Workflow instance synced with CRDT.
+ */
+async function handleExecute() {
+	if (isExecuting.value) {
+		return;
+	}
+
+	const workflowId = doc.workflowId;
+	const baseUrl = rootStore.baseUrl;
+
+	isExecuting.value = true;
+	try {
+		await executeWorkflow(workflowId, baseUrl);
+	} finally {
+		// Reset after a delay to allow execution to complete
+		// The actual completion is tracked via push events in the coordinator
+		setTimeout(() => {
+			isExecuting.value = false;
+		}, 2000);
+	}
+}
 
 // Use instanceId for Vue Flow so each view has independent viewport state
 const instance = useVueFlow(doc.instanceId);
@@ -339,8 +375,7 @@ const onAddNodesAndConnections = (payload: AddedNodesAndConnections) => {
 				...tempNode,
 				parameters: resolvedParameters,
 			});
-		} catch (error) {
-			console.error('Failed to create node:', error);
+		} catch {
 			continue;
 		}
 	}
@@ -548,6 +583,14 @@ instance.onNodeDoubleClick(({ node }) => {
 				{{ awareness.collaboratorCount.value }} online
 			</span>
 		</div>
+		<button
+			v-if="doc.isReady.value"
+			:disabled="isExecuting"
+			:class="$style.executeButton"
+			@click="handleExecute"
+		>
+			{{ isExecuting ? 'Executing...' : 'Execute Workflow' }}
+		</button>
 		<WorkflowCanvas v-if="doc.isReady.value" @click:connection:add="onClickConnectionAdd" />
 		<div v-else-if="doc.state.value === 'connecting'" :class="$style.loading">
 			Connecting to workflow...
@@ -633,5 +676,30 @@ instance.onNodeDoubleClick(({ node }) => {
 	color: var(--color--success--shade-1);
 	font-size: var(--font-size--sm);
 	font-weight: var(--font-weight--bold);
+}
+
+.executeButton {
+	position: fixed;
+	top: var(--spacing--sm);
+	right: var(--spacing--sm);
+	padding: var(--spacing--xs) var(--spacing--md);
+	border: none;
+	border-radius: var(--radius);
+	background: var(--color--primary);
+	color: white;
+	font-size: var(--font-size--sm);
+	font-weight: var(--font-weight--bold);
+	cursor: pointer;
+	z-index: 1000;
+	transition: background-color 0.2s ease;
+
+	&:hover:not(:disabled) {
+		background: var(--color--primary--shade-1);
+	}
+
+	&:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
 }
 </style>

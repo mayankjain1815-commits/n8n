@@ -44,14 +44,21 @@ export interface CRDTSubscription {
 export interface CRDTDocumentState {
 	/** CRDT document (source of truth in worker mode, proxy in server mode) */
 	doc: CRDTDoc;
-	/** Node types cache for handle computation (worker mode only) */
+	/**
+	 * Node types cache for handle computation (worker mode only).
+	 *
+	 * TODO: Currently only contains node types present in the workflow at load time.
+	 * The coordinator should have access to ALL node types from SQLite so that
+	 * newly added nodes (of types not already in the workflow) can compute
+	 * handles and sizes correctly. This requires either:
+	 * 1. Loading all node types into coordinator memory at init, or
+	 * 2. Querying SQLite on-demand when a new node type is added
+	 */
 	nodeTypes: Map<string, INodeTypeDescription>;
 	/** Unsubscribe function for handle recomputation observer (worker mode only) */
 	handleObserverUnsub: Unsubscribe | null;
 	/** Whether the document has been seeded with initial data (worker mode only) */
 	seeded: boolean;
-	/** Base URL for REST API calls (worker mode) or WebSocket URL (server mode) */
-	baseUrl: string;
 	/** Workflow room managing persistence (worker mode only, null until seeded) */
 	room: WorkflowRoom | null;
 	/** Workflow instance for handle computation (worker mode only, null until seeded) */
@@ -67,6 +74,22 @@ export interface CRDTDocumentState {
 }
 
 /**
+ * CRDT execution document state held by the coordinator.
+ *
+ * Execution documents track running execution state from push events.
+ * They are keyed by `exec-{workflowId}` and synced to subscribed tabs.
+ * The coordinator writes to these documents; tabs read only.
+ */
+export interface CRDTExecutionDocumentState {
+	/** CRDT execution document (source of truth) */
+	doc: CRDTDoc;
+	/** The workflow ID this execution document is for */
+	workflowId: string;
+	/** Current execution ID (null if no active execution) */
+	executionId: string | null;
+}
+
+/**
  * State of the coordinator SharedWorker
  */
 export interface CoordinatorState {
@@ -74,10 +97,14 @@ export interface CoordinatorState {
 	activeTabId: string | null;
 	initialized: boolean;
 	version: string | null;
+	/** Base URL for REST API calls (e.g., http://localhost:5678) */
+	baseUrl: string | null;
 	/** CRDT subscriptions by tabId */
 	crdtSubscriptions: Map<string, CRDTSubscription>;
 	/** CRDT documents by docId (source of truth in worker mode) */
 	crdtDocuments: Map<string, CRDTDocumentState>;
+	/** CRDT execution documents by docId (exec-{workflowId}) */
+	crdtExecutionDocuments: Map<string, CRDTExecutionDocumentState>;
 	/** CRDT provider instance */
 	crdtProvider: CRDTProvider | null;
 }

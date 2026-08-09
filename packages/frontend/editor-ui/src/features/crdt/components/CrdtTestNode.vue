@@ -8,16 +8,20 @@ import { N8nIcon } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 import type { NodeProps } from '@vue-flow/core';
 import { Handle, Position, useNode } from '@vue-flow/core';
-import { computed, onScopeDispose, shallowRef, triggerRef, watch } from 'vue';
+import { computed, inject, onScopeDispose, shallowRef, triggerRef, watch } from 'vue';
 import { useWorkflowDoc } from '../composables';
 import { useWorkflowAwarenessOptional } from '../composables/useWorkflowAwareness';
 import type { ComputedHandle } from '../types/workflowDocument.types';
+import type { ExecutionDocument } from '../types/executionDocument.types';
 
 const i18n = useI18n();
 
 const doc = useWorkflowDoc();
 const nodeTypesStore = useNodeTypesStore();
 const awareness = useWorkflowAwarenessOptional();
+
+// Inject execution document (provided by parent canvas component)
+const executionDoc = inject<ExecutionDocument | null>('executionDoc', null);
 
 const props = defineProps<NodeProps>();
 
@@ -109,6 +113,79 @@ if (doc.getPinnedData) {
 	hasPinnedData.value = pinnedData !== undefined && pinnedData.length > 0;
 }
 
+// --- Execution State ---
+// Track execution status for this node
+const executionStatus = shallowRef<'idle' | 'running' | 'success' | 'error'>('idle');
+const outputItemCount = shallowRef<number>(0);
+const executionError = shallowRef<string | null>(null);
+const runDataIterations = shallowRef<number>(0);
+
+// Initialize execution state from execution doc
+function updateExecutionState(): void {
+	if (!executionDoc) return;
+
+	const nodeData = executionDoc.getNodeExecutionById(props.id);
+	if (!nodeData?.length) {
+		executionStatus.value = 'idle';
+		outputItemCount.value = 0;
+		executionError.value = null;
+		runDataIterations.value = 0;
+		return;
+	}
+
+	const lastRun = nodeData[nodeData.length - 1];
+	const status = lastRun.executionStatus;
+
+	if (status === 'success') {
+		executionStatus.value = 'success';
+	} else if (status === 'error') {
+		executionStatus.value = 'error';
+		executionError.value = lastRun.error?.message ?? 'Unknown error';
+	} else {
+		executionStatus.value = 'running';
+	}
+
+	// Calculate output item count from data
+	const mainOutputs = lastRun.data?.main ?? [];
+	outputItemCount.value = mainOutputs.flat().length;
+
+	// Track number of iterations (runs) for this node
+	runDataIterations.value = nodeData.length;
+}
+
+// Subscribe to execution state changes
+let offExecutionChange: (() => void) | undefined;
+let offExecutionStarted: (() => void) | undefined;
+if (executionDoc) {
+	// Watch for execution doc to become ready (async CRDT sync)
+	// This handles the case where Tab 2 opens and receives existing execution data
+	watch(
+		() => executionDoc.isReady.value,
+		(isReady) => {
+			if (isReady) {
+				updateExecutionState();
+			}
+		},
+		{ immediate: true },
+	);
+
+	// Reset state when a new execution starts
+	const { off: offStarted } = executionDoc.onExecutionStarted(() => {
+		executionStatus.value = 'idle';
+		outputItemCount.value = 0;
+		executionError.value = null;
+		runDataIterations.value = 0;
+	});
+	offExecutionStarted = offStarted;
+
+	const { off } = executionDoc.onNodeExecutionChange(({ nodeId }) => {
+		if (nodeId === props.id) {
+			updateExecutionState();
+		}
+	});
+	offExecutionChange = off;
+}
+
 // Subscribe to pinned data changes
 let offPinnedData: (() => void) | undefined;
 if (doc.onPinnedDataChange) {
@@ -126,6 +203,8 @@ onScopeDispose(() => {
 	offSubtitle();
 	offDisabled();
 	offPinnedData?.();
+	offExecutionStarted?.();
+	offExecutionChange?.();
 });
 
 const nodeType = computed(() => {
@@ -409,6 +488,9 @@ const selectedByCollaborator = computed(() => {
 			'crdt-node--configuration': isConfigurationNode,
 			'crdt-node--configurable': isConfigurableNode,
 			'crdt-node--disabled': disabled,
+			'crdt-node--success': executionStatus === 'success',
+			'crdt-node--error': executionStatus === 'error',
+			'crdt-node--running': executionStatus === 'running',
 		}"
 		:style="selectedByCollaborator ? { '--collaborator--color': selectedByCollaborator.color } : {}"
 	>
@@ -562,6 +644,26 @@ const selectedByCollaborator = computed(() => {
 			<N8nIcon icon="node-pin" size="medium" />
 		</div>
 
+		<!-- Execution status icons (positioned bottom-right inside node, matching production) -->
+		<div v-if="executionStatus !== 'idle' && !disabled" class="status-icons">
+			<div
+				v-if="executionStatus === 'error'"
+				class="status status--error"
+				data-test-id="canvas-node-status-error"
+			>
+				<N8nIcon icon="node-execution-error" size="medium" :title="executionError ?? undefined" />
+			</div>
+			<div
+				v-else-if="executionStatus === 'success'"
+				class="status status--success"
+				data-test-id="canvas-node-status-success"
+			>
+				<N8nIcon icon="node-success" size="medium" />
+				<span v-if="runDataIterations > 1" class="status-count">{{ runDataIterations }}</span>
+			</div>
+			<!-- Running state is indicated by the animated border, not an icon -->
+		</div>
+
 		<!-- Collaborator selection indicator -->
 		<div v-if="selectedByCollaborator" class="collaborator-indicator">
 			<span class="collaborator-name">{{ selectedByCollaborator.name }}</span>
@@ -653,6 +755,63 @@ const selectedByCollaborator = computed(() => {
 .crdt-node--disabled {
 	border-color: var(--color--foreground);
 }
+
+/* Success state - green border */
+.crdt-node--success {
+	border-width: 2px;
+	border-color: var(--color--success);
+}
+
+/* Error state - red border */
+.crdt-node--error {
+	border-color: var(--color--danger);
+}
+
+/* Running state - animated gradient border */
+.crdt-node--running {
+	border-color: transparent;
+}
+
+/* stylelint-disable */
+.crdt-node--running::after {
+	content: '';
+	position: absolute;
+	inset: -3px;
+	border-radius: 10px;
+	z-index: -1;
+	background: conic-gradient(
+		from var(--node--gradient-angle),
+		rgba(255, 109, 90, 1),
+		rgba(255, 109, 90, 1) 20%,
+		rgba(255, 109, 90, 0.2) 35%,
+		rgba(255, 109, 90, 0.2) 65%,
+		rgba(255, 109, 90, 1) 90%,
+		rgba(255, 109, 90, 1)
+	);
+	animation: border-rotate 1.5s linear infinite;
+}
+
+/* Trigger nodes need different border-radius for the animated border */
+.crdt-node--trigger.crdt-node--running::after {
+	border-radius: var(--trigger-node--radius) var(--radius--lg) var(--radius--lg)
+		var(--trigger-node--radius);
+}
+
+@property --node--gradient-angle {
+	syntax: '<angle>';
+	initial-value: 0deg;
+	inherits: false;
+}
+
+@keyframes border-rotate {
+	from {
+		--node--gradient-angle: 0deg;
+	}
+	to {
+		--node--gradient-angle: 360deg;
+	}
+}
+/* stylelint-enable */
 
 /* Strike-through line for disabled nodes (matches CanvasNodeDisabledStrikeThrough.vue) */
 .disabled-strike-through {
@@ -761,6 +920,33 @@ const selectedByCollaborator = computed(() => {
 	align-items: center;
 	justify-content: center;
 	pointer-events: none;
+}
+
+/* Status icons (positioned bottom-right inside node, matching production) */
+.status-icons {
+	position: absolute;
+	bottom: var(--spacing--3xs);
+	right: var(--spacing--3xs);
+}
+
+.status {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--5xs);
+	font-weight: var(--font-weight--bold);
+}
+
+.status--success {
+	color: var(--color--success);
+}
+
+.status--error {
+	color: var(--color--danger);
+	cursor: default;
+}
+
+.status-count {
+	font-size: var(--font-size--sm);
 }
 
 /* Handle labels */

@@ -5,6 +5,10 @@ export type { CRDTSyncState, UseCRDTSyncOptions, UseCRDTSyncReturn } from './use
 export { useCrdtWorkflowDoc } from './useCrdtWorkflowDoc';
 export { useRestWorkflowDoc } from './useRestWorkflowDoc';
 
+// Execution document (execution state from push events)
+export { useExecutionDoc } from './useExecutionDoc';
+export type { UseExecutionDocOptions } from './useExecutionDoc';
+
 // Inject helper
 export { useWorkflowDoc, useWorkflowDocOptional } from './useWorkflowSync';
 

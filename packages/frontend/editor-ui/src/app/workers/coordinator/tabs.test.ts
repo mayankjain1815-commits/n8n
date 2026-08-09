@@ -41,6 +41,7 @@ describe('Coordinator Tab Operations', () => {
 			version: null,
 			crdtSubscriptions: new Map(),
 			crdtDocuments: new Map(),
+			crdtExecutionDocuments: new Map(),
 			crdtProvider: null,
 			...overrides,
 		};

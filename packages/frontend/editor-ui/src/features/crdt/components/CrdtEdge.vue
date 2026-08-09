@@ -4,9 +4,10 @@ import { isValidNodeConnectionType } from '@/app/utils/typeGuards';
 import type { Connection, EdgeProps } from '@vue-flow/core';
 import { BaseEdge, EdgeLabelRenderer } from '@vue-flow/core';
 import { NodeConnectionTypes } from 'n8n-workflow';
-import { computed, ref, useCssModule, watch } from 'vue';
+import { computed, inject, onScopeDispose, ref, shallowRef, useCssModule, watch } from 'vue';
 import CanvasEdgeToolbar from '@/features/workflows/canvas/components/elements/edges/CanvasEdgeToolbar.vue';
 import { getEdgeRenderData } from '@/features/workflows/canvas/components/elements/edges/utils';
+import type { ExecutionDocument } from '../types/executionDocument.types';
 
 const emit = defineEmits<{
 	add: [connection: Connection];
@@ -22,6 +23,9 @@ const props = defineProps<CrdtEdgeProps>();
 
 const $style = useCssModule();
 
+// Inject execution document (provided by parent canvas component)
+const executionDoc = inject<ExecutionDocument | null>('executionDoc', null);
+
 /**
  * Parse sourceHandle to determine connection type.
  * Handle format: "outputs/main/0" or "outputs/ai_tool/0"
@@ -31,6 +35,61 @@ const connectionType = computed(() => {
 	const parts = handle.split('/');
 	const type = parts[1] ?? 'main';
 	return isValidNodeConnectionType(type) ? type : NodeConnectionTypes.Main;
+});
+
+// --- Execution State ---
+// Track edge execution state (item counts)
+const edgeItemCount = shallowRef<number>(0);
+const edgeHasExecuted = shallowRef<boolean>(false);
+
+// Initialize and subscribe to edge execution state
+function updateEdgeExecutionState(): void {
+	if (!executionDoc) return;
+
+	const edgeExec = executionDoc.getEdgeExecution(props.id);
+	if (!edgeExec) {
+		edgeItemCount.value = 0;
+		edgeHasExecuted.value = false;
+		return;
+	}
+
+	edgeItemCount.value = edgeExec.totalItems;
+	edgeHasExecuted.value = edgeExec.totalItems > 0;
+}
+
+let offEdgeExecutionChange: (() => void) | undefined;
+let offExecutionStarted: (() => void) | undefined;
+if (executionDoc) {
+	// Watch for execution doc to become ready (async CRDT sync)
+	// This handles the case where Tab 2 opens and receives existing execution data
+	watch(
+		() => executionDoc.isReady.value,
+		(isReady) => {
+			if (isReady) {
+				updateEdgeExecutionState();
+			}
+		},
+		{ immediate: true },
+	);
+
+	// Reset state when a new execution starts
+	const { off: offStarted } = executionDoc.onExecutionStarted(() => {
+		edgeItemCount.value = 0;
+		edgeHasExecuted.value = false;
+	});
+	offExecutionStarted = offStarted;
+
+	const { off } = executionDoc.onEdgeExecutionChange(({ edgeId }) => {
+		if (edgeId === props.id) {
+			updateEdgeExecutionState();
+		}
+	});
+	offEdgeExecutionChange = off;
+}
+
+onScopeDispose(() => {
+	offExecutionStarted?.();
+	offEdgeExecutionChange?.();
 });
 
 const delayedHovered = ref(props.hovered);
@@ -109,10 +168,29 @@ const edgeLightness = computed(() => {
 	};
 });
 
-const edgeStyles = computed(() => ({
-	'--canvas-edge--color--lightness--light': edgeLightness.value.light,
-	'--canvas-edge--color--lightness--dark': edgeLightness.value.dark,
-}));
+const edgeStyles = computed(() => {
+	const styles: Record<string, string> = {
+		'--canvas-edge--color--lightness--light': edgeLightness.value.light,
+		'--canvas-edge--color--lightness--dark': edgeLightness.value.dark,
+	};
+
+	// Use success color when edge has executed
+	if (edgeHasExecuted.value) {
+		styles['--canvas-edge--color'] = 'var(--color--success)';
+	}
+
+	return styles;
+});
+
+/**
+ * Edge label text - shows item count during execution, or provided label otherwise.
+ */
+const edgeLabelText = computed(() => {
+	if (edgeItemCount.value > 0) {
+		return `${edgeItemCount.value} item${edgeItemCount.value !== 1 ? 's' : ''}`;
+	}
+	return props.label;
+});
 
 function onAdd() {
 	emit('add', connection.value);
@@ -145,7 +223,7 @@ function onDelete() {
 				@add="onAdd"
 				@delete="onDelete"
 			/>
-			<div v-else :class="$style.edgeLabel">{{ label }}</div>
+			<div v-else :class="$style.edgeLabel">{{ edgeLabelText }}</div>
 		</div>
 	</EdgeLabelRenderer>
 </template>

@@ -5,7 +5,7 @@ import CanvasBackground from '@/features/workflows/canvas/components/elements/ba
 import type { Connection } from '@vue-flow/core';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
 import { MiniMap } from '@vue-flow/minimap';
-import { computed, markRaw, onMounted, ref } from 'vue';
+import { computed, markRaw, ref, watch } from 'vue';
 import { useCanvasAwareness } from '../composables/useCanvasAwareness';
 import { useCanvasSync } from '../composables/useCanvasSync';
 import { useWorkflowAwarenessInject } from '../composables/useWorkflowAwareness';
@@ -62,22 +62,30 @@ function generateUserColor(seed: number): string {
 	return `hsl(${Math.round(hue)}, 70%, 50%)`;
 }
 
-// Set up local user awareness on mount
+// Set up local user awareness when CRDT document is ready (transport connected)
 const usersStore = useUsersStore();
 
-onMounted(() => {
-	const currentUser = usersStore.currentUser;
-	if (currentUser && awareness.isReady.value) {
-		// Use CRDT client ID for color - unique per browser tab
-		const clientId = awareness.clientId.value ?? 0;
+// Watch for doc to become ready (CRDT synced, transport connected), then set user info
+// We watch doc.isReady, not awareness.isReady, because doc.isReady indicates transport is connected
+watch(
+	() => doc.isReady.value,
+	(isReady) => {
+		if (isReady && awareness.isReady.value) {
+			const currentUser = usersStore.currentUser;
+			if (currentUser) {
+				// Use CRDT client ID for color - unique per browser tab
+				const clientId = awareness.clientId.value ?? 0;
 
-		awareness.setUser({
-			id: currentUser.id,
-			name: currentUser.firstName ?? currentUser.email ?? 'Anonymous',
-			color: generateUserColor(clientId),
-		});
-	}
-});
+				awareness.setUser({
+					id: currentUser.id,
+					name: currentUser.firstName ?? currentUser.email ?? 'Anonymous',
+					color: generateUserColor(clientId),
+				});
+			}
+		}
+	},
+	{ immediate: true },
+);
 
 // Zoom for cursor size compensation (inverse scale)
 const zoom = computed(() => instance.viewport.value.zoom);

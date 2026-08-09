@@ -356,7 +356,7 @@ export function useCRDTSync(options: UseCRDTSyncOptions): UseCRDTSyncReturn {
 
 		if (state.value === 'connecting') {
 			// Return a new promise that will resolve when connection completes
-			return new Promise((resolve, reject) => {
+			return await new Promise((resolve, reject) => {
 				const prevResolve = connectPromiseResolve;
 				const prevReject = connectPromiseReject;
 				connectPromiseResolve = (resolvedDoc) => {
@@ -373,7 +373,7 @@ export function useCRDTSync(options: UseCRDTSyncOptions): UseCRDTSyncReturn {
 		state.value = 'connecting';
 		error.value = null;
 
-		return new Promise((resolve, reject) => {
+		return await new Promise((resolve, reject) => {
 			connectPromiseResolve = resolve;
 			connectPromiseReject = reject;
 

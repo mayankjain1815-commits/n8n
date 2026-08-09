@@ -165,17 +165,6 @@ function isServerMode(serverUrl: string): boolean {
 }
 
 /**
- * Extract REST URL from WebSocket URL (ws://host/path → http://host)
- * Used in server mode to fetch node types via REST API.
- */
-function extractRestUrl(wsUrl: string): string {
-	return wsUrl
-		.replace(/^wss:/, 'https:')
-		.replace(/^ws:/, 'http:')
-		.replace(/\/crdt\?.*$/, ''); // Remove /crdt?docId=... path
-}
-
-/**
  * Extract nodes array from CRDT document (for fetching node types).
  * Used to determine which node types to fetch before creating Workflow instance.
  */
@@ -285,6 +274,34 @@ function getMetaFromDoc(
 // =============================================================================
 
 /**
+ * Handle subscription to execution documents.
+ * Unlike workflow documents, execution docs don't need seeding from REST -
+ * they're created on-demand when execution starts via push events.
+ */
+function handleExecutionDocSubscribe(state: CoordinatorState, tabId: string, docId: string): void {
+	const subscription = state.crdtSubscriptions.get(tabId);
+	if (!subscription) {
+		return;
+	}
+
+	// Add doc to subscription (enables future broadcasts)
+	subscription.docIds.add(docId);
+
+	// Get existing execution doc if it exists
+	const docState = state.crdtExecutionDocuments.get(docId);
+	if (docState) {
+		// Send current state to newly subscribed tab
+		const currentState = docState.doc.encodeState();
+		sendToTab(subscription.crdtPort, MESSAGE_SYNC, docId, currentState);
+		sendToTab(subscription.crdtPort, MESSAGE_INITIAL_SYNC, docId, new Uint8Array(0));
+	} else {
+		// Doc doesn't exist yet - will be created when execution starts
+		// Just send empty initial sync so tab knows subscription is complete
+		sendToTab(subscription.crdtPort, MESSAGE_INITIAL_SYNC, docId, new Uint8Array(0));
+	}
+}
+
+/**
  * Handle SUBSCRIBE message - branch based on server mode vs worker mode.
  *
  * Worker Mode: Seed from REST API, hold document locally, compute handles.
@@ -296,11 +313,16 @@ async function handleSubscribe(
 	docId: string,
 	serverUrl: string,
 ): Promise<void> {
+	// Handle execution documents separately (they don't need REST seeding)
+	if (docId.startsWith('exec-')) {
+		handleExecutionDocSubscribe(state, tabId, docId);
+		return;
+	}
+
 	ensureCRDTProvider(state);
 
 	const subscription = state.crdtSubscriptions.get(tabId);
 	if (!subscription) {
-		console.error('[CRDT Coordinator] No subscription found for tab', tabId);
 		return;
 	}
 
@@ -319,7 +341,6 @@ async function handleSubscribe(
 			nodeTypes: new Map(),
 			handleObserverUnsub: null,
 			seeded: false,
-			baseUrl: serverUrl,
 			room: null,
 			// Server mode fields
 			serverMode,
@@ -333,19 +354,30 @@ async function handleSubscribe(
 		// =================================================================
 		// SERVER MODE: Connect to WebSocket server, proxy messages
 		// =================================================================
-		console.log('[CRDT Coordinator] Server mode for document', docId);
-
 		if (!docState.serverTransport) {
 			await connectToServer(state, docId, docState, serverUrl);
+		} else {
+			// Server transport already exists - this is a new subscriber to an existing connection
+			// Send current document state to the new tab (similar to worker mode)
+			const currentState = docState.doc.encodeState();
+			if (currentState.length > 0) {
+				sendToTab(subscription.crdtPort, MESSAGE_SYNC, docId, currentState);
+			}
+
+			// Send awareness state
+			const awareness = docState.doc.getAwareness();
+			const awarenessState = awareness.encodeState();
+			if (awarenessState.length > 0) {
+				sendToTab(subscription.crdtPort, MESSAGE_AWARENESS, docId, awarenessState);
+			}
+
+			// Signal initial sync complete
+			sendToTab(subscription.crdtPort, MESSAGE_INITIAL_SYNC, docId, new Uint8Array(0));
 		}
-		// Server sends initial state - we forward it to tabs via the transport handler
-		// No need to send initial state here, the transport handler does it on first MESSAGE_SYNC
 	} else {
 		// =================================================================
 		// WORKER MODE: Seed from REST, hold locally (existing behavior)
 		// =================================================================
-		console.log('[CRDT Coordinator] Worker mode for document', docId);
-
 		// Seed the document if not already seeded
 		if (!docState.seeded) {
 			await seedDocument(state, docId, docState);
@@ -391,7 +423,7 @@ async function connectToServer(
 	let workflowInitialized = false;
 
 	// Handle messages FROM server
-	const unsubReceive = transport.onReceive((data: Uint8Array) => {
+	const unsubReceive = transport.onReceive(async (data: Uint8Array) => {
 		const { messageType, payload } = decodeMessage(data);
 
 		if (messageType === MESSAGE_SYNC) {
@@ -403,21 +435,22 @@ async function connectToServer(
 			// Send INITIAL_SYNC to tabs on first sync message from server
 			if (!initialSyncSent) {
 				initialSyncSent = true;
-				broadcastToSubscribedTabs(state, docId, MESSAGE_INITIAL_SYNC, new Uint8Array(0));
-				console.log('[CRDT Coordinator] Server mode initial sync complete', docId);
 
 				// Initialize local Workflow after first sync (doc now has data)
 				// This is needed for expression resolution during local execution
+				// We await this so workflow is ready before signaling INITIAL_SYNC to tabs
 				if (!workflowInitialized) {
 					workflowInitialized = true;
-					void initializeWorkflowForServerMode(state, docId, docState);
+					await initializeWorkflowForServerMode(state, docId, docState);
 				}
+
+				// Signal ready AFTER workflow is initialized
+				broadcastToSubscribedTabs(state, docId, MESSAGE_INITIAL_SYNC, new Uint8Array(0));
 			}
 		} else if (messageType === MESSAGE_AWARENESS) {
-			// Apply to local awareness
+			// Apply to local awareness and forward to all tabs
 			const awareness = docState.doc.getAwareness();
 			awareness.applyUpdate(payload);
-			// Forward to all tabs (including for split-view support)
 			broadcastToSubscribedTabs(state, docId, MESSAGE_AWARENESS, payload);
 		}
 	});
@@ -425,18 +458,16 @@ async function connectToServer(
 	// Handle connection state changes
 	const unsubConnection = transport.onConnectionChange((connected) => {
 		if (connected) {
-			console.log('[CRDT Coordinator] Server connected', docId);
 			broadcastToSubscribedTabs(state, docId, MESSAGE_CONNECTED, new Uint8Array(0));
 		} else {
-			console.log('[CRDT Coordinator] Server disconnected', docId);
 			broadcastToSubscribedTabs(state, docId, MESSAGE_DISCONNECTED, new Uint8Array(0));
 			initialSyncSent = false; // Reset for reconnection
 		}
 	});
 
 	// Handle errors
-	const unsubError = transport.onError((error) => {
-		console.error('[CRDT Coordinator] Server transport error', docId, error);
+	const unsubError = transport.onError(() => {
+		// Error handling - transport will reconnect automatically
 	});
 
 	docState.serverTransport = transport;
@@ -467,8 +498,8 @@ async function initializeWorkflowForServerMode(
 		const { name, settings } = getMetaFromDoc(docState.doc, docId);
 
 		// Fetch node types (needed for Workflow construction)
-		const restUrl = extractRestUrl(docState.baseUrl);
-		const nodeTypes = await fetchNodeTypesForWorkflow(restUrl, nodes, state);
+		// Use state.baseUrl (set during coordinator.initialize) for REST calls
+		const nodeTypes = await fetchNodeTypesForWorkflow(state.baseUrl!, nodes, state);
 		docState.nodeTypes = nodeTypes;
 
 		const workerNodeTypes = createWorkerNodeTypes(nodeTypes);
@@ -494,31 +525,8 @@ async function initializeWorkflowForServerMode(
 			syncUnsub();
 			existingUnsub?.();
 		};
-
-		// Detailed logging for verification against server
-		console.log('[CRDT Coordinator] Workflow initialized for server mode', docId);
-		console.log('[CRDT Coordinator] === SYNCHRONIZED WORKFLOW DATA ===');
-		console.log('[CRDT Coordinator] Name:', name);
-		console.log('[CRDT Coordinator] Settings:', JSON.stringify(settings, null, 2));
-		console.log(
-			'[CRDT Coordinator] Nodes:',
-			JSON.stringify(
-				nodes.map((n) => ({
-					id: n.id,
-					name: n.name,
-					type: n.type,
-					position: n.position,
-					parameters: n.parameters,
-					typeVersion: n.typeVersion,
-				})),
-				null,
-				2,
-			),
-		);
-		console.log('[CRDT Coordinator] Connections:', JSON.stringify(connections, null, 2));
-		console.log('[CRDT Coordinator] === END SYNCHRONIZED WORKFLOW DATA ===');
-	} catch (error) {
-		console.error('[CRDT Coordinator] Failed to initialize workflow for server mode', docId, error);
+	} catch {
+		// Failed to initialize workflow for server mode
 	}
 }
 
@@ -580,7 +588,6 @@ function cleanupDocument(state: CoordinatorState, docId: string): void {
 		if (docState.serverTransportUnsub) {
 			docState.serverTransportUnsub();
 		}
-		console.log('[CRDT Coordinator] Server mode document cleaned up', docId);
 	} else {
 		// WORKER MODE: Destroy room and unsubscribe from observers
 		if (docState.room) {
@@ -590,7 +597,6 @@ function cleanupDocument(state: CoordinatorState, docId: string): void {
 		if (docState.handleObserverUnsub) {
 			docState.handleObserverUnsub();
 		}
-		console.log('[CRDT Coordinator] Worker mode document cleaned up', docId);
 	}
 
 	// Destroy the document (both modes)
@@ -630,7 +636,8 @@ function handleSyncMessage(
 
 /**
  * Handle AWARENESS message from a tab.
- * In server mode, forward to server. In worker mode, apply locally and broadcast.
+ * In server mode, forward to server AND broadcast to tabs.
+ * In worker mode, apply locally and broadcast.
  */
 function handleAwarenessMessage(
 	state: CoordinatorState,
@@ -642,8 +649,13 @@ function handleAwarenessMessage(
 	if (!docState) return;
 
 	if (docState.serverMode && docState.serverTransport?.connected) {
-		// SERVER MODE: Forward to server (server applies and broadcasts back)
+		// SERVER MODE: Forward to server AND broadcast to tabs
+		// The server broadcasts to "other clients" but the coordinator is the only client,
+		// so we handle cross-tab awareness directly.
+		const awareness = docState.doc.getAwareness();
+		awareness.applyUpdate(payload);
 		docState.serverTransport.send(encodeMessage(MESSAGE_AWARENESS, payload));
+		broadcastToSubscribedTabs(state, docId, MESSAGE_AWARENESS, payload);
 	} else {
 		// WORKER MODE: Apply locally and broadcast
 		const awareness = docState.doc.getAwareness();
@@ -713,14 +725,14 @@ async function seedDocument(
 ): Promise<void> {
 	try {
 		// Fetch workflow data via REST API
-		const workflowData = await fetchWorkflowData(docState.baseUrl, docId);
+		// Use state.baseUrl (set during coordinator.initialize) for REST calls
+		const workflowData = await fetchWorkflowData(state.baseUrl!, docId);
 		if (!workflowData) {
-			console.error('[CRDT Coordinator] Failed to fetch workflow data', docId);
 			return;
 		}
 
 		// Fetch node types for handle computation
-		const nodeTypes = await fetchNodeTypesForWorkflow(docState.baseUrl, workflowData.nodes, state);
+		const nodeTypes = await fetchNodeTypesForWorkflow(state.baseUrl!, workflowData.nodes, state);
 
 		// Store node types in document state
 		docState.nodeTypes = nodeTypes;
@@ -742,17 +754,6 @@ async function seedDocument(
 
 		// Compute handles for all nodes using shared function from n8n-workflow
 		const nodesWithHandles = computeAllNodeHandles(workflow, workflowData.nodes, workerNodeTypes);
-
-		console.log(
-			'[CRDT Coordinator] Computed handles for nodes:',
-			nodesWithHandles.map((n) => ({
-				id: n.id,
-				name: n.name,
-				type: n.type,
-				inputCount: n.inputs?.length ?? 0,
-				outputCount: n.outputs?.length ?? 0,
-			})),
-		);
 
 		// Use shared seeding function, passing seedValueDeep from @n8n/crdt
 		// Cast to SeedValueDeepFn since @n8n/crdt CRDTDoc is compatible with CRDTDocLike
@@ -800,17 +801,18 @@ async function seedDocument(
 		};
 
 		// Create the workflow room with a save callback
+		// Use state.baseUrl (set during coordinator.initialize) for REST calls
 		docState.room = new WorkflowRoom(
 			docState.doc,
 			workflow,
 			unsubscribe,
 			workflowData.versionId ?? '',
-			async (room) => await saveWorkflowViaRest(docState.baseUrl, room),
+			async (room) => await saveWorkflowViaRest(state.baseUrl!, room),
 		);
 
 		docState.seeded = true;
-	} catch (error) {
-		console.error('[CRDT Coordinator] Failed to seed document', docId, error);
+	} catch {
+		// Failed to seed document
 	}
 }
 
@@ -838,33 +840,26 @@ async function fetchWorkflowData(
 	// Ensure no double slashes by removing trailing slash from baseUrl
 	const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
 	const url = `${normalizedBaseUrl}/rest/workflows/${workflowId}`;
-	console.log('[CRDT Coordinator] Fetching workflow from:', url);
 	try {
 		const response = await fetch(url, {
 			credentials: 'include', // Include cookies for authentication
 		});
 		if (!response.ok) {
-			console.error(
-				'[CRDT Coordinator] Failed to fetch workflow',
-				response.status,
-				response.statusText,
-			);
 			return null;
 		}
 		const data = await response.json();
 		return data.data as WorkflowData;
-	} catch (error) {
-		console.error('[CRDT Coordinator] Error fetching workflow', error);
+	} catch {
 		return null;
 	}
 }
 
 /**
- * Fetch node types needed for a workflow
- * First tries SQLite cache via Data Worker, falls back to REST API
+ * Fetch node types needed for a workflow from SQLite cache via Data Worker.
+ * Node types are preloaded during initialization via loadNodeTypes.
  */
 async function fetchNodeTypesForWorkflow(
-	baseUrl: string,
+	_baseUrl: string,
 	nodes: INode[],
 	state: CoordinatorState,
 ): Promise<Map<string, INodeTypeDescription>> {
@@ -873,62 +868,28 @@ async function fetchNodeTypesForWorkflow(
 	// Get unique node type names
 	const typeNames = new Set(nodes.map((n) => n.type));
 
-	// Try to get from SQLite via active data worker first
+	// Get from SQLite via active data worker
 	const activeTab = state.tabs.get(state.activeTabId ?? '');
-	if (activeTab?.dataWorker) {
+	if (!activeTab?.dataWorker) {
+		return nodeTypes;
+	}
+
+	for (const typeName of typeNames) {
 		try {
-			for (const typeName of Array.from(typeNames)) {
-				const result = await activeTab.dataWorker.query(
-					`SELECT data FROM nodeTypes WHERE id LIKE '${typeName}@%' ORDER BY id DESC LIMIT 1`,
-				);
-				if (result.rows.length > 0) {
-					const data = JSON.parse(result.rows[0][0] as string) as INodeTypeDescription;
-					// Use node name as key - the adapter will match by name and version
-					nodeTypes.set(data.name, data);
-				}
+			// Use parameterized query to prevent SQL injection
+			const result = await activeTab.dataWorker.queryWithParams(
+				'SELECT data FROM nodeTypes WHERE id LIKE ? ORDER BY id DESC LIMIT 1',
+				[`${typeName}@%`],
+			);
+			if (result.rows.length > 0) {
+				const data = JSON.parse(result.rows[0][0] as string) as INodeTypeDescription;
+				nodeTypes.set(data.name, data);
 			}
 		} catch {
-			// Fall through to REST API
+			// Node type not found in cache - skip
 		}
 	}
 
-	// Fetch any missing types from REST API
-	const missingTypes = Array.from(typeNames).filter((name) => {
-		for (const key of Array.from(nodeTypes.keys())) {
-			if (key.startsWith(`${name}@`)) return false;
-		}
-		return true;
-	});
-
-	console.log('[CRDT Coordinator] Node types from SQLite:', Array.from(nodeTypes.keys()));
-	console.log('[CRDT Coordinator] Missing types to fetch from REST:', missingTypes);
-
-	if (missingTypes.length > 0) {
-		try {
-			// Ensure no double slashes by removing trailing slash from baseUrl
-			const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
-			const response = await fetch(`${normalizedBaseUrl}/rest/node-types`, {
-				credentials: 'include', // Include cookies for authentication
-			});
-			if (response.ok) {
-				const data = await response.json();
-				console.log(
-					'[CRDT Coordinator] Fetched node types from REST, count:',
-					data.data?.length ?? 0,
-				);
-				for (const nodeType of data.data as INodeTypeDescription[]) {
-					// Use node name as key - the adapter will match by name and version
-					nodeTypes.set(nodeType.name, nodeType);
-				}
-			} else {
-				console.error('[CRDT Coordinator] Failed to fetch node types from REST:', response.status);
-			}
-		} catch (error) {
-			console.error('[CRDT Coordinator] Error fetching node types', error);
-		}
-	}
-
-	console.log('[CRDT Coordinator] Final node types count:', nodeTypes.size);
 	return nodeTypes;
 }
 
@@ -1006,7 +967,6 @@ async function saveWorkflowViaRest(baseUrl: string, room: WorkflowRoom): Promise
 
 	// Skip if no changes
 	if (!room.hasUnsavedChanges()) {
-		console.log('[CRDT Coordinator] No changes to save, skipping', docId);
 		return;
 	}
 
@@ -1027,12 +987,6 @@ async function saveWorkflowViaRest(baseUrl: string, room: WorkflowRoom): Promise
 			autosaved: true,
 		};
 
-		console.log('[CRDT Coordinator] Saving workflow', {
-			docId,
-			nodeCount: nodes.length,
-			connectionCount: Object.keys(connections).length,
-		});
-
 		// Save via REST API
 		const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
 		const response = await fetch(`${normalizedBaseUrl}/rest/workflows/${docId}`, {
@@ -1050,9 +1004,7 @@ async function saveWorkflowViaRest(baseUrl: string, room: WorkflowRoom): Promise
 
 		// Mark room as clean after successful save
 		room.markClean();
-
-		console.log('[CRDT Coordinator] Saved workflow successfully', { docId });
-	} catch (error) {
-		console.error('[CRDT Coordinator] Failed to save workflow', docId, error);
+	} catch {
+		// Failed to save workflow
 	}
 }

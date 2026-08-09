@@ -131,9 +131,7 @@ export function useWorkflowAwareness(
 			updated.some((cid) => cid !== myClientId) ||
 			removed.some((cid) => cid !== myClientId);
 
-		if (!hasOtherClients) {
-			return;
-		}
+		if (!hasOtherClients) return;
 
 		// Handle removed clients
 		for (const cid of removed) {

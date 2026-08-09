@@ -45,8 +45,6 @@ export async function registerTab(): Promise<string> {
 		return tabState.tabId;
 	}
 
-	console.log('[Coordinator] Registering tab...');
-
 	// Create a MessageChannel to pass the data worker to the coordinator
 	const dataWorkerChannel = new MessageChannel();
 
@@ -70,8 +68,6 @@ export async function registerTab(): Promise<string> {
 	tabState.tabId = newTabId;
 	tabState.isRegistered = true;
 
-	console.log(`[Coordinator] Registered as tab: ${newTabId}`);
-
 	// Set up cleanup on page unload
 	setupCleanupHandlers();
 
@@ -83,7 +79,7 @@ export async function registerTab(): Promise<string> {
  */
 function unregisterCurrentTab(): void {
 	if (tabState.tabId) {
-		coordinator.unregisterTab(tabState.tabId).catch(console.error);
+		void coordinator.unregisterTab(tabState.tabId);
 		tabState.isRegistered = false;
 		tabState.tabId = null;
 		if (tabState.crdtPort) {
@@ -105,16 +101,14 @@ function setupCleanupHandlers(): void {
 	// Re-register when page is restored from bfcache
 	window.addEventListener('pageshow', (event) => {
 		if (event.persisted && !tabState.isRegistered) {
-			console.log('[Coordinator] Page restored from bfcache, re-registering...');
-			registerTab().catch(console.error);
+			void registerTab();
 		}
 	});
 
 	// Re-register when page becomes visible again (e.g., on mobile after switching apps)
 	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState === 'visible' && !tabState.isRegistered) {
-			console.log('[Coordinator] Page became visible, re-registering...');
-			registerTab().catch(console.error);
+			void registerTab();
 		}
 	});
 }
@@ -148,6 +142,28 @@ export async function getCoordinatorInfo(): Promise<{
 		tabCount: await coordinator.getTabCount(),
 		isInitialized: await coordinator.isInitialized(),
 	};
+}
+
+/**
+ * Execute a workflow using the Coordinator's synced Workflow instance.
+ *
+ * The Coordinator has an up-to-date Workflow instance that's kept in sync
+ * with the CRDT document. This function:
+ * 1. Connects to the push endpoint (gets a pushRef)
+ * 2. Calls the execution API with the workflow data and pushRef
+ * 3. Receives execution updates via push (logged to console)
+ *
+ * @param workflowId - The workflow ID to execute
+ * @param baseUrl - The base URL for API and push endpoints
+ * @param triggerNodeName - Optional trigger node to start from
+ * @returns The execution ID if successful, null otherwise
+ */
+export async function executeWorkflow(
+	workflowId: string,
+	baseUrl: string,
+	triggerNodeName?: string,
+): Promise<string | null> {
+	return await coordinator.executeWorkflow(workflowId, baseUrl, triggerNodeName);
 }
 
 // Re-export types
