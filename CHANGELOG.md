@@ -1,3 +1,13 @@
+## [1.123.19](https://github.com/n8n-io/n8n/compare/n8n@1.123.18...n8n@1.123.19) (2026-02-06)
+
+
+### Bug Fixes
+
+* **core:** Use stricter flags when starting python runner (backport 1.x) ([#25157](https://github.com/n8n-io/n8n/issues/25157)) ([c39496e](https://github.com/n8n-io/n8n/commit/c39496eda92ff5c93241af42f21e839fb2abc239))
+* Update mime-types to fixed version 3.0.2 ([#25148](https://github.com/n8n-io/n8n/issues/25148)) ([dba9864](https://github.com/n8n-io/n8n/commit/dba9864e00ade452a5c09aa93784d42e7383b3ed))
+
+
+
 ## [1.123.18](https://github.com/n8n-io/n8n/compare/n8n@1.123.17...n8n@1.123.18) (2026-01-29)
 
 
