@@ -14,6 +14,7 @@ import { NoHttpRequestWithManualAuthRule } from './no-http-request-with-manual-a
 import { NoOverridesFieldRule } from './no-overrides-field.js';
 import { NoRestrictedGlobalsRule } from './no-restricted-globals.js';
 import { NoRestrictedImportsRule } from './no-restricted-imports.js';
+import { NoRuntimeDependenciesRule } from './no-runtime-dependencies.js';
 import { NodeClassDescriptionIconMissingRule } from './node-class-description-icon-missing.js';
 import { NodeConnectionTypeLiteralRule } from './node-connection-type-literal.js';
 import { NodeUsableAsToolRule } from './node-usable-as-tool.js';
@@ -41,6 +42,7 @@ export const rules = {
 	'no-forbidden-lifecycle-scripts': NoForbiddenLifecycleScriptsRule,
 	'no-http-request-with-manual-auth': NoHttpRequestWithManualAuthRule,
 	'no-overrides-field': NoOverridesFieldRule,
+	'no-runtime-dependencies': NoRuntimeDependenciesRule,
 	'icon-validation': IconValidationRule,
 	'resource-operation-pattern': ResourceOperationPatternRule,
 	'credential-documentation-url': CredentialDocumentationUrlRule,
