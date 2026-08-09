@@ -12,6 +12,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 	JsonObject,
+	Logger,
 } from 'n8n-workflow';
 import { basename, dirname } from 'path';
 import ftpClient from 'promise-ftp';
@@ -163,6 +164,19 @@ function buildAlgorithmsConfig(credentials: ICredentialDataDecryptedObject): any
 
 	// Only return if at least one algorithm category is configured
 	return Object.keys(algorithms).length > 0 ? algorithms : undefined;
+}
+
+/**
+ * Create SSH2 debug function that logs to n8n logger
+ */
+function createSsh2DebugFunction(
+	logger: Logger,
+	nodeType: string,
+	nodeName: string,
+): (message: string) => void {
+	return (message: string) => {
+		logger.debug(`[${nodeType}] [${nodeName}] SSH2 Protocol`, { message });
+	};
 }
 
 export class Ftp implements INodeType {
@@ -607,6 +621,7 @@ export class Ftp implements INodeType {
 							privateKey: formatPrivateKey(credentials.privateKey as string),
 							passphrase: credentials.passphrase as string | undefined,
 							algorithms: algorithmsConfig,
+							debug: createSsh2DebugFunction(this.logger, 'SFTP', 'Credential Test'),
 						});
 					} else {
 						await sftp.connect({
@@ -615,6 +630,7 @@ export class Ftp implements INodeType {
 							username: credentials.username as string,
 							password: credentials.password as string,
 							algorithms: algorithmsConfig,
+							debug: createSsh2DebugFunction(this.logger, 'SFTP', 'Credential Test'),
 						});
 					}
 				} catch (error) {
@@ -656,6 +672,8 @@ export class Ftp implements INodeType {
 				if (protocol === 'sftp') {
 					sftp = new sftpClient();
 					const algorithmsConfig = buildAlgorithmsConfig(credentials);
+					const nodeType = this.getNode().type;
+					const nodeName = this.getNode().name;
 					if (credentials.privateKey) {
 						await sftp.connect({
 							host: credentials.host as string,
@@ -668,6 +686,7 @@ export class Ftp implements INodeType {
 							algorithms: algorithmsConfig || {
 								compress: ['zlib@openssh.com', 'zlib', 'none'],
 							},
+							debug: createSsh2DebugFunction(this.logger, nodeType, nodeName),
 						});
 					} else {
 						await sftp.connect({
@@ -679,6 +698,7 @@ export class Ftp implements INodeType {
 							algorithms: algorithmsConfig || {
 								compress: ['zlib@openssh.com', 'zlib', 'none'],
 							},
+							debug: createSsh2DebugFunction(this.logger, nodeType, nodeName),
 						});
 					}
 				} else {
