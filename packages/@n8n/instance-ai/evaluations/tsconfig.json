@@ -8,11 +8,7 @@
 		"lib": ["es2023"],
 		"emitDecoratorMetadata": true,
 		"experimentalDecorators": true,
-		"paths": {
-			"@/*": ["./src/*"]
-		},
-		"tsBuildInfoFile": "dist/typecheck.tsbuildinfo",
 		"types": ["node", "jest"]
 	},
-	"include": ["src/**/*.ts"]
+	"include": ["**/*.ts"]
 }
