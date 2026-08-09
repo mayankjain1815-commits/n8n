@@ -13,6 +13,7 @@ export class FileData implements INodeType {
 		icon: 'fa:file',
 		group: ['input'],
 		version: 1,
+		hidden: true,
 		description: 'Outputs uploaded file as binary data',
 		defaults: {
 			name: 'File Data',
