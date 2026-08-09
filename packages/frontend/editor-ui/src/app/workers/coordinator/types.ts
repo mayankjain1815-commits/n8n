@@ -44,17 +44,6 @@ export interface CRDTSubscription {
 export interface CRDTDocumentState {
 	/** CRDT document (source of truth in worker mode, proxy in server mode) */
 	doc: CRDTDoc;
-	/**
-	 * Node types cache for handle computation (worker mode only).
-	 *
-	 * TODO: Currently only contains node types present in the workflow at load time.
-	 * The coordinator should have access to ALL node types from SQLite so that
-	 * newly added nodes (of types not already in the workflow) can compute
-	 * handles and sizes correctly. This requires either:
-	 * 1. Loading all node types into coordinator memory at init, or
-	 * 2. Querying SQLite on-demand when a new node type is added
-	 */
-	nodeTypes: Map<string, INodeTypeDescription>;
 	/** Unsubscribe function for handle recomputation observer (worker mode only) */
 	handleObserverUnsub: Unsubscribe | null;
 	/** Whether the document has been seeded with initial data (worker mode only) */
@@ -107,6 +96,21 @@ export interface CoordinatorState {
 	crdtExecutionDocuments: Map<string, CRDTExecutionDocumentState>;
 	/** CRDT provider instance */
 	crdtProvider: CRDTProvider | null;
+	/**
+	 * Global node types cache shared by all documents.
+	 * Loaded once from SQLite after loadNodeTypes completes.
+	 */
+	nodeTypes: Map<string, INodeTypeDescription> | null;
+	/**
+	 * Promise that resolves when node types are loaded.
+	 * Used by seedDocument to wait for node types before computing handles.
+	 */
+	nodeTypesPromise: Promise<void> | null;
+	/**
+	 * Resolver for nodeTypesPromise.
+	 * Called by loadNodeTypes when node types are ready.
+	 */
+	nodeTypesResolver: (() => void) | null;
 }
 
 /**

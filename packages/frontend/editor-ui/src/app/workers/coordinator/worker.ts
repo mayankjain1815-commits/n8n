@@ -41,6 +41,12 @@ import { executeWorkflow as executeWorkflowOp } from './operations/execute';
 import { ensurePushConnection as ensurePushConnectionOp } from './operations/executionPush';
 import { initialize as initializeOp } from './initialize';
 
+// Create nodeTypes promise that will be resolved when loadNodeTypes completes
+let nodeTypesResolver: (() => void) | null = null;
+const nodeTypesPromise = new Promise<void>((resolve) => {
+	nodeTypesResolver = resolve;
+});
+
 const state: CoordinatorState = {
 	tabs: new Map(),
 	activeTabId: null,
@@ -52,6 +58,9 @@ const state: CoordinatorState = {
 	crdtDocuments: new Map(),
 	crdtExecutionDocuments: new Map(),
 	crdtProvider: null,
+	nodeTypes: null,
+	nodeTypesPromise,
+	nodeTypesResolver,
 };
 
 // ============================================================================

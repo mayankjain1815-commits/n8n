@@ -338,7 +338,6 @@ async function handleSubscribe(
 		const doc = state.crdtProvider!.createDoc(docId);
 		docState = {
 			doc,
-			nodeTypes: new Map(),
 			handleObserverUnsub: null,
 			seeded: false,
 			room: null,
@@ -492,16 +491,19 @@ async function initializeWorkflowForServerMode(
 	docState: CRDTDocumentState,
 ): Promise<void> {
 	try {
+		// Wait for node types to be loaded (handles race condition where
+		// CRDT subscription happens before loadNodeTypes completes)
+		if (state.nodeTypesPromise) {
+			await state.nodeTypesPromise;
+		}
+
 		// Extract current state from CRDT doc (already populated from server sync)
 		const nodes = getNodesFromDoc(docState.doc);
 		const connections = getConnectionsFromDoc(docState.doc);
 		const { name, settings } = getMetaFromDoc(docState.doc, docId);
 
-		// Fetch node types (needed for Workflow construction)
-		// Use state.baseUrl (set during coordinator.initialize) for REST calls
-		const nodeTypes = await fetchNodeTypesForWorkflow(state.baseUrl!, nodes, state);
-		docState.nodeTypes = nodeTypes;
-
+		// Get node types from coordinator's global cache (loaded at init)
+		const nodeTypes = getNodeTypes(state);
 		const workerNodeTypes = createWorkerNodeTypes(nodeTypes);
 
 		// Create Workflow instance with current CRDT state
@@ -724,6 +726,12 @@ async function seedDocument(
 	docState: CRDTDocumentState,
 ): Promise<void> {
 	try {
+		// Wait for node types to be loaded (handles race condition where
+		// CRDT subscription happens before loadNodeTypes completes)
+		if (state.nodeTypesPromise) {
+			await state.nodeTypesPromise;
+		}
+
 		// Fetch workflow data via REST API
 		// Use state.baseUrl (set during coordinator.initialize) for REST calls
 		const workflowData = await fetchWorkflowData(state.baseUrl!, docId);
@@ -731,13 +739,8 @@ async function seedDocument(
 			return;
 		}
 
-		// Fetch node types for handle computation
-		const nodeTypes = await fetchNodeTypesForWorkflow(state.baseUrl!, workflowData.nodes, state);
-
-		// Store node types in document state
-		docState.nodeTypes = nodeTypes;
-
-		// Create a WorkerNodeTypes adapter
+		// Get node types from coordinator's global cache (loaded at init)
+		const nodeTypes = getNodeTypes(state);
 		const workerNodeTypes = createWorkerNodeTypes(nodeTypes);
 
 		// Create Workflow instance for handle computation
@@ -855,42 +858,11 @@ async function fetchWorkflowData(
 }
 
 /**
- * Fetch node types needed for a workflow from SQLite cache via Data Worker.
- * Node types are preloaded during initialization via loadNodeTypes.
+ * Get the global node types cache from coordinator state.
+ * Node types are loaded once at init and shared across all documents.
  */
-async function fetchNodeTypesForWorkflow(
-	_baseUrl: string,
-	nodes: INode[],
-	state: CoordinatorState,
-): Promise<Map<string, INodeTypeDescription>> {
-	const nodeTypes = new Map<string, INodeTypeDescription>();
-
-	// Get unique node type names
-	const typeNames = new Set(nodes.map((n) => n.type));
-
-	// Get from SQLite via active data worker
-	const activeTab = state.tabs.get(state.activeTabId ?? '');
-	if (!activeTab?.dataWorker) {
-		return nodeTypes;
-	}
-
-	for (const typeName of typeNames) {
-		try {
-			// Use parameterized query to prevent SQL injection
-			const result = await activeTab.dataWorker.queryWithParams(
-				'SELECT data FROM nodeTypes WHERE id LIKE ? ORDER BY id DESC LIMIT 1',
-				[`${typeName}@%`],
-			);
-			if (result.rows.length > 0) {
-				const data = JSON.parse(result.rows[0][0] as string) as INodeTypeDescription;
-				nodeTypes.set(data.name, data);
-			}
-		} catch {
-			// Node type not found in cache - skip
-		}
-	}
-
-	return nodeTypes;
+function getNodeTypes(state: CoordinatorState): Map<string, INodeTypeDescription> {
+	return state.nodeTypes ?? new Map();
 }
 
 // =============================================================================
@@ -898,24 +870,10 @@ async function fetchNodeTypesForWorkflow(
 // =============================================================================
 
 /**
- * Get all versions supported by a node type description
- */
-function getNodeTypeVersions(nodeType: INodeTypeDescription): number[] {
-	const version = nodeType.version;
-	if (typeof version === 'number') {
-		return [version];
-	}
-	if (Array.isArray(version)) {
-		return version;
-	}
-	return [1];
-}
-
-/**
  * Create an INodeTypes adapter from a Map of node types.
  *
- * Note: Node types can have multiple versions (e.g., version: [2, 2.1, 2.2, 2.3]).
- * The map key format is `name@version1,version2,...` but we look up by individual version.
+ * The map is keyed by "name@version" for precise version lookups.
+ * This matches how SQLite stores node types (one row per version).
  */
 function createWorkerNodeTypes(nodeTypes: Map<string, INodeTypeDescription>): INodeTypes {
 	return {
@@ -923,12 +881,13 @@ function createWorkerNodeTypes(nodeTypes: Map<string, INodeTypeDescription>): IN
 			// Find any node type with matching name, prefer latest version
 			let latest: INodeTypeDescription | undefined;
 			let latestVersion = -1;
-			nodeTypes.forEach((nodeType) => {
-				if (nodeType.name === name) {
-					const versions = getNodeTypeVersions(nodeType);
-					const maxVersion = Math.max(...versions);
-					if (maxVersion > latestVersion) {
-						latestVersion = maxVersion;
+			nodeTypes.forEach((nodeType, key) => {
+				// Key format is "name@version"
+				if (key.startsWith(`${name}@`)) {
+					const versionStr = key.slice(name.length + 1);
+					const version = parseFloat(versionStr);
+					if (version > latestVersion) {
+						latestVersion = version;
 						latest = nodeType;
 					}
 				}
@@ -939,14 +898,11 @@ function createWorkerNodeTypes(nodeTypes: Map<string, INodeTypeDescription>): IN
 			if (version === undefined) {
 				return this.getByName(name);
 			}
-			// Find node type that supports this specific version
-			for (const nodeType of nodeTypes.values()) {
-				if (nodeType.name === name) {
-					const versions = getNodeTypeVersions(nodeType);
-					if (versions.includes(version)) {
-						return { description: nodeType };
-					}
-				}
+			// Direct lookup by name@version key
+			const key = `${name}@${version}`;
+			const nodeType = nodeTypes.get(key);
+			if (nodeType) {
+				return { description: nodeType };
 			}
 			return undefined;
 		},
