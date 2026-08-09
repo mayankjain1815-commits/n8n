@@ -1,3 +1,13 @@
+## [2.7.2](https://github.com/n8n-io/n8n/compare/n8n@2.7.1...n8n@2.7.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* **core:** Prevent SQL syntax error when filtering users with empty ids array ([#25284](https://github.com/n8n-io/n8n/issues/25284)) ([e90a385](https://github.com/n8n-io/n8n/commit/e90a38523b8f3f1927b14e6312098fcaac25eced))
+* **core:** Wrong pagination argument order for sqlite in copyTables helper ([#25301](https://github.com/n8n-io/n8n/issues/25301)) ([d7db629](https://github.com/n8n-io/n8n/commit/d7db62943bc5afa242aff29f95445c5d40dcac6f))
+
+
+
 ## [2.7.1](https://github.com/n8n-io/n8n/compare/n8n@2.7.0...n8n@2.7.1) (2026-02-03)
 
 
