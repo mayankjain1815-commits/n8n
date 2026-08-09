@@ -38,6 +38,9 @@ type ErrorReporterInitOptions = {
 	 * whether they are actually enabled or not.
 	 */
 	eligibleIntegrations?: Partial<Record<SentryIntegration, boolean>>;
+
+	/** Health endpoint path */
+	healthEndpoint?: string;
 };
 
 const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -105,6 +108,7 @@ export class ErrorReporter {
 		profilesSampleRate,
 		tracesSampleRate,
 		eligibleIntegrations = {},
+		healthEndpoint = 'healthz',
 	}: ErrorReporterInitOptions) {
 		if (inTest) return;
 
@@ -182,8 +186,8 @@ export class ErrorReporter {
 			...(isTracingEnabled ? { tracesSampleRate } : {}),
 			...(isProfilingEnabled ? { profilesSampleRate, profileLifecycle: 'trace' } : {}),
 			beforeSend: this.beforeSend.bind(this) as NodeOptions['beforeSend'],
-			ignoreTransactions: ['GET /healthz', 'GET /metrics'],
-			ignoreSpans: ['GET /healthz', 'GET /metrics'],
+			ignoreTransactions: [`GET /${healthEndpoint}`, 'GET /metrics'],
+			ignoreSpans: [`GET /${healthEndpoint}`, 'GET /metrics'],
 			integrations: (integrations) => [
 				...integrations.filter(({ name }) => enabledIntegrations.has(name)),
 				rewriteFramesIntegration({ root: '/' }),

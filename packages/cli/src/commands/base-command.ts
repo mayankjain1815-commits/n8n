@@ -96,6 +96,7 @@ export abstract class BaseCommand<F = never> {
 			withEventLoopBlockDetection: true,
 			tracesSampleRate,
 			profilesSampleRate,
+			healthEndpoint: this.globalConfig.endpoints.health,
 			eligibleIntegrations: {
 				Express: true,
 				Http: true,
