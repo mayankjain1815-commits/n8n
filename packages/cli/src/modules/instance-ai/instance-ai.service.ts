@@ -1485,7 +1485,11 @@ export class InstanceAiService {
 		messageGroupId?: string,
 		pushRef?: string,
 	) {
-		const localGatewayDisabled = await this.settingsService.isLocalGatewayDisabledForUser(user.id);
+		const localGatewayDisabledGlobally =
+			this.settingsService.getAdminSettings().localGatewayDisabled;
+		const localGatewayDisabledForUser = await this.settingsService.isLocalGatewayDisabledForUser(
+			user.id,
+		);
 		const userGateway = this.gatewayRegistry.findGateway(user.id);
 
 		// When the proxy is enabled, create a single ProxyTokenManager and
@@ -1528,7 +1532,7 @@ export class InstanceAiService {
 			pushRef,
 			threadId,
 		});
-		if (!localGatewayDisabled && userGateway?.isConnected) {
+		if (!localGatewayDisabledForUser && userGateway?.isConnected) {
 			context.localMcpServer = userGateway;
 		}
 		context.permissions = this.settingsService.getPermissions();
@@ -1546,14 +1550,19 @@ export class InstanceAiService {
 		context.runId = runId;
 
 		// Compute gateway status for the system prompt
-		if (localGatewayDisabled) {
-			context.localGatewayStatus = { status: 'disabled' };
-		} else if (userGateway?.isConnected) {
-			context.localGatewayStatus = { status: 'connected' };
+		if (localGatewayDisabledGlobally) {
+			context.localGatewayStatus = { status: 'disabledGlobally' };
+		} else if (!localGatewayDisabledForUser && userGateway?.isConnected) {
+			context.localGatewayStatus = {
+				status: 'connected',
+				capabilities: userGateway
+					.getStatus()
+					.toolCategories.filter(({ enabled }) => enabled)
+					.map(({ name }) => name),
+			};
 		} else {
 			context.localGatewayStatus = {
-				status: 'disconnected',
-				capabilities: ['filesystem', 'browser'],
+				status: localGatewayDisabledForUser ? 'disabled' : 'disconnected',
 			};
 		}
 
