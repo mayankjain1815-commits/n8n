@@ -17,6 +17,7 @@ import { NoRestrictedImportsRule } from './no-restricted-imports.js';
 import { NoRuntimeDependenciesRule } from './no-runtime-dependencies.js';
 import { NodeClassDescriptionIconMissingRule } from './node-class-description-icon-missing.js';
 import { NodeConnectionTypeLiteralRule } from './node-connection-type-literal.js';
+import { NodeOperationErrorItemIndexRule } from './node-operation-error-itemindex.js';
 import { NodeUsableAsToolRule } from './node-usable-as-tool.js';
 import { OptionsSortedAlphabeticallyRule } from './options-sorted-alphabetically.js';
 import { PackageNameConventionRule } from './package-name-convention.js';
@@ -50,6 +51,7 @@ export const rules = {
 	'node-class-description-icon-missing': NodeClassDescriptionIconMissingRule,
 	'cred-class-field-icon-missing': CredClassFieldIconMissingRule,
 	'node-connection-type-literal': NodeConnectionTypeLiteralRule,
+	'node-operation-error-itemindex': NodeOperationErrorItemIndexRule,
 	'missing-paired-item': MissingPairedItemRule,
 	'require-community-node-keyword': RequireCommunityNodeKeywordRule,
 	'require-continue-on-fail': RequireContinueOnFailRule,
