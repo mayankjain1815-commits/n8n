@@ -726,6 +726,7 @@ export interface InstanceAiThreadSummary {
 	id: string;
 	title: string;
 	createdAt: string;
+	metadata?: Record<string, unknown>;
 }
 
 export type InstanceAiSSEConnectionState =
