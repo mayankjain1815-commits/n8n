@@ -1,20 +1,18 @@
-import { Table, TableIndex } from '@n8n/typeorm';
+import { Table } from '@n8n/typeorm';
 import type { MigrationInterface, QueryRunner } from '@n8n/typeorm';
 
-const TABLE = 'workflow_execution';
+const TABLE = 'workflow_step_execution';
 
-export class CreateWorkflowExecution1778529600000 implements MigrationInterface {
+export class CreateWorkflowStepExecution1784890100000 implements MigrationInterface {
 	async up(queryRunner: QueryRunner): Promise<void> {
 		await queryRunner.createTable(
 			new Table({
 				name: TABLE,
 				columns: [
 					{ name: 'id', type: 'uuid', isPrimary: true },
-					{ name: 'workflow_id', type: 'varchar' },
+					{ name: 'execution_id', type: 'uuid' },
+					{ name: 'node_id', type: 'varchar' },
 					{ name: 'status', type: 'varchar', length: '32' },
-					{ name: 'mode', type: 'varchar', length: '32' },
-					{ name: 'graph', type: 'jsonb' },
-					{ name: 'trigger_payload', type: 'jsonb', isNullable: true },
 					{
 						name: 'created_at',
 						type: 'timestamptz',
@@ -27,21 +25,26 @@ export class CreateWorkflowExecution1778529600000 implements MigrationInterface 
 						precision: 3,
 						default: 'CURRENT_TIMESTAMP(3)',
 					},
-					{ name: 'finished_at', type: 'timestamptz', precision: 3, isNullable: true },
+				],
+				indices: [
+					{ name: 'idx_workflow_step_execution_execution_id', columnNames: ['execution_id'] },
+				],
+				foreignKeys: [
+					{
+						columnNames: ['execution_id'],
+						referencedTableName: 'workflow_execution',
+						referencedColumnNames: ['id'],
+						onDelete: 'CASCADE',
+					},
 				],
 				checks: [
 					{
-						name: 'chk_workflow_execution_status',
+						name: 'chk_workflow_step_execution_status',
 						expression: "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
 					},
 				],
 			}),
 		);
-
-		await queryRunner.createIndices(TABLE, [
-			new TableIndex({ name: 'idx_workflow_execution_workflow_id', columnNames: ['workflow_id'] }),
-			new TableIndex({ name: 'idx_workflow_execution_status', columnNames: ['status'] }),
-		]);
 	}
 
 	async down(queryRunner: QueryRunner): Promise<void> {
