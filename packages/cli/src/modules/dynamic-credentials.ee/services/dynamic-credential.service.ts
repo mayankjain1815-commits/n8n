@@ -1,7 +1,7 @@
 import { Logger } from '@n8n/backend-common';
 import { CredentialResolverDataNotFoundError } from '@n8n/decorators';
 import { Service } from '@n8n/di';
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Response } from 'express';
 import { Cipher } from 'n8n-core';
 import type {
 	ICredentialDataDecryptedObject,
@@ -23,6 +23,7 @@ import type {
 import { DynamicCredentialResolverRepository } from '../database/repositories/credential-resolver.repository';
 import { DynamicCredentialsConfig } from '../dynamic-credentials.config';
 import { CredentialResolutionError } from '../errors/credential-resolution.error';
+import { AuthenticatedRequest } from '@n8n/db';
 
 /**
  * Service for resolving credentials dynamically via configured resolvers.
@@ -63,8 +64,12 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 			credentialsResolveMetadata.resolverId ?? workflowSettings?.credentialResolverId;
 
 		// Not resolvable - return static credentials
-		if (!credentialsResolveMetadata.isResolvable || !resolverId) {
+		if (!credentialsResolveMetadata.isResolvable) {
 			return staticData;
+		}
+
+		if (!resolverId) {
+			return this.handleMissingResolver(credentialsResolveMetadata, staticData, resolverId);
 		}
 
 		// Load resolver configuration
@@ -202,7 +207,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 	private handleMissingResolver(
 		credentialsResolveMetadata: CredentialResolveMetadata,
 		staticData: ICredentialDataDecryptedObject,
-		resolverId: string,
+		resolverId?: string,
 	): ICredentialDataDecryptedObject {
 		if (credentialsResolveMetadata.resolvableAllowFallback) {
 			this.logger.debug('Resolver not found, falling back to static credentials', {
@@ -215,7 +220,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		}
 
 		throw new CredentialResolutionError(
-			`Resolver "${resolverId}" not found for credential "${credentialsResolveMetadata.name}"`,
+			`Resolver "${resolverId ?? 'unknown'}" not found for credential "${credentialsResolveMetadata.name}"`,
 		);
 	}
 
@@ -246,7 +251,11 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 	getDynamicCredentialsEndpointsMiddleware() {
 		const { endpointAuthToken } = this.dynamicCredentialConfig;
 		if (!endpointAuthToken?.trim()) {
-			return (_req: Request, res: Response, _next: NextFunction) => {
+			return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+				// If a user was authenticated for this request, we allow access irrelevant of the static authentication
+				if (req.user) {
+					return next();
+				}
 				this.logger.error(
 					'Dynamic credentials external endpoints require an endpoint auth token. Please set the N8N_DYNAMIC_CREDENTIALS_ENDPOINT_AUTH_TOKEN environment variable to enable access.',
 				);
@@ -257,6 +266,17 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 			};
 		}
 
-		return StaticAuthService.getStaticAuthMiddleware(endpointAuthToken, 'x-authorization')!;
+		const staticAuthMiddlware = StaticAuthService.getStaticAuthMiddleware(
+			endpointAuthToken,
+			'x-authorization',
+		)!;
+
+		return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+			// If a user was authenticated for this request, we allow access irrelevant of the static authentication
+			if (req.user) {
+				return next();
+			}
+			return staticAuthMiddlware(req, res, next);
+		};
 	}
 }

@@ -1,6 +1,6 @@
 import type { Logger } from '@n8n/backend-common';
 import { CredentialResolverDataNotFoundError, type ICredentialResolver } from '@n8n/decorators';
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 import type { Cipher } from 'n8n-core';
 import type {
 	ICredentialContext,
@@ -19,6 +19,7 @@ import { CredentialResolutionError } from '../../errors/credential-resolution.er
 import type { DynamicCredentialResolverRegistry } from '../credential-resolver-registry.service';
 import { DynamicCredentialService } from '../dynamic-credential.service';
 import type { ResolverConfigExpressionService } from '../resolver-config-expression.service';
+import type { AuthenticatedRequest } from '@n8n/db';
 
 describe('DynamicCredentialService', () => {
 	let service: DynamicCredentialService;
@@ -226,18 +227,6 @@ describe('DynamicCredentialService', () => {
 				expect(mockResolverRepository.findOneBy).not.toHaveBeenCalled();
 			});
 
-			it('credential has no resolver ID', async () => {
-				const credentialsEntity = createMockCredentialsMetadata({
-					isResolvable: true,
-					resolverId: undefined,
-				});
-
-				const result = await service.resolveIfNeeded(credentialsEntity, staticData, undefined);
-
-				expect(result).toBe(staticData);
-				expect(mockResolverRepository.findOneBy).not.toHaveBeenCalled();
-			});
-
 			it('resolver entity is not found and fallback is allowed', async () => {
 				const credentialsEntity = createMockCredentialsMetadata({
 					resolvableAllowFallback: true,
@@ -387,27 +376,6 @@ describe('DynamicCredentialService', () => {
 					}),
 				);
 			});
-
-			it('no resolver on credential or workflow settings', async () => {
-				const credentialsEntity = createMockCredentialsMetadata({
-					resolverId: undefined,
-				});
-				const executionContext = createMockExecutionContext('encrypted-credentials');
-				const additionalData = {
-					...createMockAdditionalData('exec-123', {}, executionContext),
-					workflowSettings: {}, // No credentialResolverId
-				};
-
-				const result = await service.resolveIfNeeded(
-					credentialsEntity,
-					staticData,
-					additionalData.executionContext,
-					undefined,
-				);
-
-				expect(result).toBe(staticData);
-				expect(mockResolverRepository.findOneBy).not.toHaveBeenCalled();
-			});
 		});
 
 		describe('should throw error when', () => {
@@ -425,6 +393,37 @@ describe('DynamicCredentialService', () => {
 				await expect(
 					service.resolveIfNeeded(credentialsEntity, staticData, undefined),
 				).rejects.toThrow('Resolver "resolver-456" not found for credential "Test Credential"');
+			});
+
+			it('no resolver on credential or workflow settings', async () => {
+				const credentialsEntity = createMockCredentialsMetadata({
+					resolverId: undefined,
+				});
+				const executionContext = createMockExecutionContext('encrypted-credentials');
+				const additionalData = {
+					...createMockAdditionalData('exec-123', {}, executionContext),
+					workflowSettings: {}, // No credentialResolverId
+				};
+
+				await expect(
+					service.resolveIfNeeded(
+						credentialsEntity,
+						staticData,
+						additionalData.executionContext,
+						undefined,
+					),
+				).rejects.toThrow(CredentialResolutionError);
+			});
+
+			it('credential has no resolver ID', async () => {
+				const credentialsEntity = createMockCredentialsMetadata({
+					isResolvable: true,
+					resolverId: undefined,
+				});
+
+				await expect(
+					service.resolveIfNeeded(credentialsEntity, staticData, undefined),
+				).rejects.toThrow(CredentialResolutionError);
 			});
 
 			it('resolver instance is not found in registry and fallback is not allowed', async () => {
@@ -1090,7 +1089,9 @@ describe('DynamicCredentialService', () => {
 					mockExpressionService,
 				);
 				const middleware = service.getDynamicCredentialsEndpointsMiddleware();
-				const mockReq = {} as Request;
+				const mockReq = {
+					cookies: {},
+				} as AuthenticatedRequest;
 				const mockRes = {
 					status: jest.fn().mockReturnThis(),
 					json: jest.fn(),
@@ -1121,6 +1122,77 @@ describe('DynamicCredentialService', () => {
 				service.getDynamicCredentialsEndpointsMiddleware();
 				expect(getStaticAuthMiddlewareSpy).toHaveBeenCalledWith('test-token', 'x-authorization');
 				getStaticAuthMiddlewareSpy.mockRestore();
+			});
+
+			describe('cookie authentication bypass', () => {
+				it('should bypass static auth check when req.user is present', () => {
+					mockDynamicCredentialConfig.endpointAuthToken = 'test-token';
+					service = new DynamicCredentialService(
+						mockDynamicCredentialConfig,
+						mockResolverRegistry,
+						mockResolverRepository,
+						mockLoadNodesAndCredentials,
+						mockCipher,
+						mockLogger,
+						mockExpressionService,
+					);
+
+					const middleware = service.getDynamicCredentialsEndpointsMiddleware();
+
+					const mockReq = {
+						user: { id: 'user-123', email: 'test@example.com' }, // Authenticated user
+						cookies: {},
+						headers: {}, // No X-Authorization header
+					} as AuthenticatedRequest;
+
+					const mockRes = {
+						status: jest.fn().mockReturnThis(),
+						json: jest.fn(),
+					} as unknown as Response;
+
+					const mockNext = jest.fn();
+
+					middleware(mockReq, mockRes, mockNext);
+
+					// Should call next() without checking static auth
+					expect(mockNext).toHaveBeenCalled();
+					expect(mockRes.status).not.toHaveBeenCalled();
+					expect(mockRes.json).not.toHaveBeenCalled();
+				});
+
+				it('should bypass 500 error when no token configured but req.user is present', () => {
+					mockDynamicCredentialConfig.endpointAuthToken = ''; // No token configured
+					service = new DynamicCredentialService(
+						mockDynamicCredentialConfig,
+						mockResolverRegistry,
+						mockResolverRepository,
+						mockLoadNodesAndCredentials,
+						mockCipher,
+						mockLogger,
+						mockExpressionService,
+					);
+
+					const middleware = service.getDynamicCredentialsEndpointsMiddleware();
+
+					const mockReq = {
+						user: { id: 'user-123', email: 'test@example.com' }, // Authenticated user
+						cookies: {},
+					} as AuthenticatedRequest;
+
+					const mockRes = {
+						status: jest.fn().mockReturnThis(),
+						json: jest.fn(),
+					} as unknown as Response;
+
+					const mockNext = jest.fn();
+
+					middleware(mockReq, mockRes, mockNext);
+
+					// Should call next() instead of returning 500 error
+					expect(mockNext).toHaveBeenCalled();
+					expect(mockLogger.error).not.toHaveBeenCalled();
+					expect(mockRes.status).not.toHaveBeenCalled();
+				});
 			});
 		});
 	});

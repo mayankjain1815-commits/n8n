@@ -27,8 +27,6 @@ export const BATCH_11AUG_EXPERIMENT = createExperiment('37_onboarding_experiment
 
 export const TEMPLATE_RECO_V2 = createExperiment('039_template_onboarding_v2');
 
-export const UPGRADE_PLAN_CTA_EXPERIMENT = createExperiment('054_upgrade_plan_cta');
-
 export const READY_TO_RUN_V2_EXPERIMENT = createExperiment('042_ready-to-run-worfklow_v2', {
 	control: 'control',
 	variant1: 'variant-1-singlebox',
@@ -65,17 +63,25 @@ export const RESOURCE_CENTER_EXPERIMENT = createExperiment('063_resource_center_
 	variantInspiration: 'variant-inspiration',
 });
 
+export const SIDEBAR_EXPANDED_EXPERIMENT = createExperiment('067_sidebar_expanded');
+export const EMPTY_STATE_EXPERIMENT = createExperiment('070_empty_screen_layout', {
+	control: 'control',
+	variantBuilderPrompt: 'variant-builder-prompt',
+	variantTemplates: 'variant-templates',
+});
+
 export const EXPERIMENTS_TO_TRACK = [
 	EXTRA_TEMPLATE_LINKS_EXPERIMENT.name,
 	TEMPLATE_ONBOARDING_EXPERIMENT.name,
 	BATCH_11AUG_EXPERIMENT.name,
 	TEMPLATE_RECO_V2.name,
 	READY_TO_RUN_V2_P3_EXPERIMENT.name,
-	UPGRADE_PLAN_CTA_EXPERIMENT.name,
 	AI_BUILDER_TEMPLATE_EXAMPLES_EXPERIMENT.name,
 	TEMPLATE_SETUP_EXPERIENCE.name,
 	RESOURCE_CENTER_EXPERIMENT.name,
 	EXECUTION_LOGIC_V2_EXPERIMENT.name,
 	COLLECTION_OVERHAUL_EXPERIMENT.name,
 	TAMPER_PROOF_INVITE_LINKS.name,
+	SIDEBAR_EXPANDED_EXPERIMENT.name,
+	EMPTY_STATE_EXPERIMENT.name,
 ];

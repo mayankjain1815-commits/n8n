@@ -1,6 +1,7 @@
 import type { Scope } from '../../types.ee';
 
 export const GLOBAL_OWNER_SCOPES: Scope[] = [
+	'aiAssistant:manage',
 	'annotationTag:create',
 	'annotationTag:read',
 	'annotationTag:update',
@@ -42,6 +43,7 @@ export const GLOBAL_OWNER_SCOPES: Scope[] = [
 	'orchestration:read',
 	'saml:manage',
 	'securityAudit:generate',
+	'securitySettings:manage',
 	'sourceControl:pull',
 	'sourceControl:push',
 	'sourceControl:manage',

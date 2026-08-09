@@ -4,7 +4,7 @@ import { useChatPanelStore } from '@/features/ai/assistant/chatPanel.store';
 import { useAssistantStore } from '@/features/ai/assistant/assistant.store';
 import { useSettingsStore } from '@/app/stores/settings.store';
 import { useDebounce } from '@/app/composables/useDebounce';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import SlideTransition from '@/app/components/transitions/SlideTransition.vue';
 import AskAssistantBuild from './Agent/AskAssistantBuild.vue';
 import AskAssistantChat from './Chat/AskAssistantChat.vue';
@@ -22,10 +22,28 @@ const settingsStore = useSettingsStore();
 const { isBuildMode, canToggleModes, shouldShowCoachmark, onDismissCoachmark } =
 	useAskModeCoachmark();
 
+// Track when slide animation has completed to prevent coachmark from appearing off-screen
+const slideAnimationComplete = ref(false);
+const canShowCoachmark = computed(() => shouldShowCoachmark.value && slideAnimationComplete.value);
+
+// Reset animation state when panel closes
+watch(
+	() => chatPanelStore.isOpen,
+	(isOpen) => {
+		if (!isOpen) {
+			slideAnimationComplete.value = false;
+		}
+	},
+);
+
 const askAssistantBuildRef = ref<InstanceType<typeof AskAssistantBuild>>();
 const askAssistantChatRef = ref<InstanceType<typeof AskAssistantChat>>();
 
 const chatWidth = computed(() => chatPanelStore.width);
+
+const allowSendingParameterValues = computed(
+	() => settingsStore.settings.ai.allowSendingParameterValues,
+);
 
 function onResize(data: { direction: string; x: number; width: number }) {
 	chatPanelStore.updateWidth(data.width);
@@ -66,6 +84,7 @@ function onClose() {
 }
 
 function onSlideEnterComplete() {
+	slideAnimationComplete.value = true;
 	if (isBuildMode.value) {
 		askAssistantBuildRef.value?.focusInput();
 	} else {
@@ -123,14 +142,22 @@ onBeforeUnmount(() => {
 				<div :class="$style.assistantContent">
 					<AskAssistantBuild v-if="isBuildMode" ref="askAssistantBuildRef" @close="onClose">
 						<template v-if="canToggleModes" #header>
-							<HubSwitcher :is-build-mode="isBuildMode" @toggle="toggleAssistantMode" />
+							<HubSwitcher
+								:is-build-mode="isBuildMode"
+								:disabled="!allowSendingParameterValues"
+								@toggle="toggleAssistantMode"
+							/>
 						</template>
 					</AskAssistantBuild>
 					<AskAssistantChat v-else ref="askAssistantChatRef" @close="onClose">
 						<!-- Header switcher is only visible when both modes are available in current view -->
 						<template v-if="canToggleModes" #header>
-							<AskModeCoachmark :visible="shouldShowCoachmark" @dismiss="onDismissCoachmark">
-								<HubSwitcher :is-build-mode="isBuildMode" @toggle="toggleAssistantMode" />
+							<AskModeCoachmark :visible="canShowCoachmark" @dismiss="onDismissCoachmark">
+								<HubSwitcher
+									:is-build-mode="isBuildMode"
+									:disabled="!allowSendingParameterValues"
+									@toggle="toggleAssistantMode"
+								/>
 							</AskModeCoachmark>
 						</template>
 					</AskAssistantChat>
