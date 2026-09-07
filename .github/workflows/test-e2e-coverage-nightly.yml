@@ -378,6 +378,18 @@ jobs:
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
 
+approve-and-automerge:
+    needs: [commit-impact-map]
+    # `!cancelled()` for the same reason as commit-impact-map, or the refresh PR
+    # opens and never merges.
+    if: ${{ !cancelled() && needs.commit-impact-map.outputs.pull-request-number }}
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/util-approve-and-set-automerge.yml
+    secrets: inherit
+    with:
+      pull-request-number: ${{ needs.commit-impact-map.outputs.pull-request-number }}
   approve-and-automerge:
     needs: [commit-impact-map]
     # `!cancelled()` for the same reason as commit-impact-map, or the refresh PR
