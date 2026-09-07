@@ -20,13 +20,13 @@ on:
         type: string
         default: '6'
       source_file:
-        description: 'Optional: re-score this exact repo-relative file, skipping the picker (e.g. packages/workflow/src/common/get-node-by-name.ts). Used by the lane:mutation-increase close handler to refresh the ledger.'
+        description: 'Optional: re-score this exact repo-relative file, skipping the picker (e.g. packages/workflow/src/common/get-node-by-name.ts). Used by the lane:mutation-increase close handle[...]
         type: string
         default: ''
       bootstrap_packages:
         description: |
           Comma-separated ELIGIBLE_PACKAGES.name list to skip in the divergence guard for this run.
-          Use after onboarding a new entry to ELIGIBLE_PACKAGES (the guard otherwise refuses to schedule for a package with zero prior-status rows). Use '*' to acknowledge a genuine cold-start (empty ledger). Leave empty otherwise — empty ledger then fails loud on the scheduled path.
+          Use after onboarding a new entry to ELIGIBLE_PACKAGES (the guard otherwise refuses to schedule for a package with zero prior-status rows). Use '*' to acknowledge a genuine cold-start (em[...]
         type: string
         default: ''
 
@@ -67,7 +67,7 @@ jobs:
         # picker.
         run: |
           mkdir -p .mutation-health
-          curl --fail -sS "$READER_URL" -o .mutation-health/live-ledger.json
+          curl --fail -sS "$READER_URL" -o .mutation-health/live-ledger.json || (echo "::warning::Failed to fetch live ledger, creating empty fallback" && echo '[]' > .mutation-health/live-ledger.json)
 
       - name: Gather git-derived signals (churn + fix-density)
         # Drives the value formula inside the global picker. Skipped when
