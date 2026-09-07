@@ -20,13 +20,13 @@ on:
         type: string
         default: '6'
       source_file:
-        description: 'Optional: re-score this exact repo-relative file, skipping the picker (e.g. packages/workflow/src/common/get-node-by-name.ts). Used by the lane:mutation-increase close handle[...]
+        description: 'Optional: re-score this exact repo-relative file, skipping the picker (e.g. packages/workflow/src/common/get-node-by-name.ts). Used by the lane:mutation-increase close handle.'
         type: string
         default: ''
       bootstrap_packages:
         description: |
           Comma-separated ELIGIBLE_PACKAGES.name list to skip in the divergence guard for this run.
-          Use after onboarding a new entry to ELIGIBLE_PACKAGES (the guard otherwise refuses to schedule for a package with zero prior-status rows). Use '*' to acknowledge a genuine cold-start (em[...]
+          Use after onboarding a new entry to ELIGIBLE_PACKAGES (the guard otherwise refuses to schedule for a package with zero prior-status rows). Use '*' to acknowledge a genuine cold-start.
         type: string
         default: ''
 
