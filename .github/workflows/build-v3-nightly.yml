@@ -27,15 +27,16 @@ jobs:
     steps:
       - name: Compute date tag
         id: date
-        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+        run: echo "date=$(date -u +\%Y\%m\%d)" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build and push v3-nightly images
     needs: prepare
-    # No permissions/secrets caps here on purpose: this mirrors the proven
-    # release-publish.yml caller so docker-build-push.yml runs with the permissions
-    # (its own per-job blocks + repo defaults) and org secrets it already relies on.
-    # Capping here risks starving its sub-jobs (SLSA/attestation/scan/push).
+    permissions:
+      actions: read
+      packages: write
+      id-token: write
+      contents: read
     uses: ./.github/workflows/docker-build-push.yml # zizmor: ignore[excessive-permissions,secrets-inherit]
     with:
       ref: '3.x'
