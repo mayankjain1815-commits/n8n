@@ -1,46 +1,39 @@
-# Builds and publishes nightly Docker images for the v3 (3.x) branch.
-#
-# Produces n8nio/n8n:v3-nightly and a timestamped n8nio/n8n:v3-nightly-<date>
-# (plus the matching runners images) so v3 can be trialed in docker/kubernetes
-# before release. Reuses the shared docker-build-push.yml pipeline, pointing it
-# at the 3.x branch via the `ref` input.
-#
-# Lives on master so the schedule fires (scheduled runs only trigger on the
-# default branch), but builds the 3.x branch's code.
-
-name: 'Build: v3 Nightly Docker Images'
+name: "Build: v3 Nightly Docker Images"
 
 on:
-  schedule:
-    # 08:00 UTC — after the master→3.x sync (06:00) so the image reflects the latest sync
-    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
-  prepare:
-    name: Compute date tag
+  build-and-push:
     runs-on: ubuntu-latest
-    permissions: {}
-    outputs:
-      date_tag: ${{ steps.date.outputs.date }}
+
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Compute date tag
         id: date
-        run: echo "date=$(date -u +\%Y\%m\%d)" >> "$GITHUB_OUTPUT"
+        run: echo "TAG=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
-  build:
-    name: Build and push v3-nightly images
-    needs: prepare
-    permissions:
-      actions: read
-      packages: write
-      id-token: write
-      contents: read
-    uses: ./.github/workflows/docker-build-push.yml # zizmor: ignore[excessive-permissions,secrets-inherit]
-    with:
-      ref: '3.x'
-      n8n_version: 'v3-nightly'
-      release_type: 'nightly'
-      date_tag: ${{ needs.prepare.outputs.date_tag }}
-      push_enabled: true
-    secrets: inherit
+      - name: Build and Push Multi-Arch Docker Images
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/n8n:nightly
+            ${{ secrets.DOCKER_USERNAME }}/n8n:${{ steps.date.outputs.TAG }}
