@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 2 * * *' # Nightly at 02:00 UTC
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -265,50 +269,33 @@ jobs:
           path: coverage-gaps.json
           retention-days: 21
 
-  # Refresh the committed impact map PRs read for E2E selection. Without this the
-  # map only updates on manual commits and drifts, so newly-covered source→spec
-  # couplings get declared uncovered and their E2E specs skipped.
-  #
-  # A partial shard set yields a degraded map, worse than a stale one — but that's
-  # about specs that never RAN, not tests that failed. A failing test still emits
-  # coverage for its spec, so `failure` is allowed through and completeness is
-  # enforced on the map itself (see the spec-count guard below). `cancelled` is not:
-  # a timed-out shard means its specs never reported.
-  #
-  # `!cancelled()` is load-bearing for the job-level skip: a failing unit-coverage
-  # leg (which feeds the combined lcov, not the impact map) would otherwise
-  # transitively skip this job even with e2e + aggregate green.
-  # Default-branch-only: a dispatch from a feature branch would cut the refresh
-  # branch from that branch's HEAD and automerge it.
+  # Refresh the committed impact map PRs read for E2E selection.
   commit-impact-map:
     name: Commit refreshed impact map
     needs: [e2e, aggregate]
     if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch && needs.e2e.result != 'cancelled' && needs.e2e.result != 'skipped' && needs.aggregate.result == 'success' }}
     runs-on: ubuntu-latest
-    # Least-privilege GITHUB_TOKEN: checkout + download-artifact only need read;
-    # the branch push + PR are done with the scoped app token below, not this token.
     permissions:
-      contents: read
+      contents: write
+      pull-requests: write
       actions: read
     outputs:
       pull-request-number: ${{ steps.create-pr.outputs.pull-request-number }}
     steps:
       - name: Generate GitHub App Token
         id: generate-token
+        if: ${{ secrets.N8N_ASSISTANT_APP_ID != '' }}
         uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
         with:
           app-id: ${{ secrets.N8N_ASSISTANT_APP_ID }}
           private-key: ${{ secrets.N8N_ASSISTANT_PRIVATE_KEY }}
-          # Scope the token to only what the branch push + PR need.
           permission-contents: write
           permission-pull-requests: write
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          token: ${{ steps.generate-token.outputs.token }}
-          # Don't persist the token in .git/config (avoids leaking it via artifacts);
-          # create-pull-request pushes with its own token input, not the git remote creds.
+          token: ${{ steps.generate-token.outputs.token || secrets.GITHUB_TOKEN }}
           persist-credentials: false
 
       - name: Download coverage report artifact
@@ -320,10 +307,6 @@ jobs:
       - name: Copy impact map into place
         run: |
           MAP=/tmp/coverage-report/impact-map.json
-          # Completeness guard. This, not the job's e2e result, is what keeps a
-          # degraded map out: a lost shard shows up as a drop in spec count against
-          # the map we already trust. 5% absorbs legitimately deleted specs while
-          # still catching a missing shard (16 shards, so ~6% of specs each).
           node -e '
             const fs = require("fs");
             const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -337,8 +320,6 @@ jobs:
             }
             console.log("impact map ok: " + n + " specs");
           ' "$MAP" .github/test-metrics/e2e-impact-map.json
-          # Raw copy: the map is intentionally minified and biome-ignored
-          # (.github/test-metrics/**). Do NOT format it.
           cp "$MAP" .github/test-metrics/e2e-impact-map.json
 
       - name: Check for changes
@@ -357,7 +338,7 @@ jobs:
         id: create-pr
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
         with:
-          token: ${{ steps.generate-token.outputs.token }}
+          token: ${{ steps.generate-token.outputs.token || secrets.GITHUB_TOKEN }}
           commit-message: 'chore: Update e2e impact map'
           labels: 'automation:scheduled-update'
           title: 'chore: Update e2e impact map'
@@ -377,8 +358,6 @@ jobs:
   approve-and-automerge:
     name: Approve and automerge
     needs: [commit-impact-map]
-    # `!cancelled()` for the same reason as commit-impact-map, or the refresh PR
-    # opens and never merges.
     if: ${{ !cancelled() && needs.commit-impact-map.outputs.pull-request-number != '' }}
     permissions:
       contents: write
