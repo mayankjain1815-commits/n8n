@@ -29,6 +29,13 @@ describe('smartDecimal', () => {
 		expect(smartDecimal(0.000567, 5)).toBe(0.00057);
 	});
 
+	it('should round numbers written in scientific notation', () => {
+		expect(smartDecimal(1e-7)).toBe(0);
+		expect(smartDecimal(1e-7, 8)).toBe(1e-7);
+		expect(smartDecimal(1.234e-7, 6)).toBe(0);
+		expect(smartDecimal(1.234e-7, 7)).toBe(1e-7);
+	});
+
 	it('should round to two decimal if it is smaller than the given one', () => {
 		expect(smartDecimal(42.56, 3)).toBe(42.56);
 	});
