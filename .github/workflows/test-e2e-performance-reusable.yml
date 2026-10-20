@@ -3,8 +3,6 @@ name: 'Test: E2E Performance'
 on:
   workflow_call:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight
 
 jobs:
   # Cache-aware: no-op if an ancestor already populated the SHA-keyed cache.
