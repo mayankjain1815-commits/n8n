@@ -52,6 +52,13 @@ describe('parseLedgerBody', () => {
 		assert.deepEqual(parseLedgerBody('{"ledger":[]}'), { rows: [] });
 	});
 
+	it('treats a bare JSON array as a ledger', () => {
+		assert.deepEqual(parseLedgerBody('[]'), { rows: [] });
+		assert.deepEqual(parseLedgerBody(JSON.stringify(MULTI_PKG_FIXTURE)), {
+			rows: MULTI_PKG_FIXTURE,
+		});
+	});
+
 	it('throws on a payload missing the `ledger` array', () => {
 		assert.throws(() => parseLedgerBody('{}'), /missing `ledger` array/);
 		assert.throws(() => parseLedgerBody('{"ledger":"oops"}'), /missing `ledger` array/);
@@ -121,6 +128,13 @@ describe('readLedger (file I/O)', () => {
 	it('reads an empty-body file as a zero-row ledger (reader-webhook contract for unscored packages)', async () => {
 		const file = path.join(tmp, 'empty.json');
 		writeFileSync(file, '');
+		const { rows } = await readLedger({ path: file });
+		assert.deepEqual(rows, []);
+	});
+
+	it('reads a bare-array fallback file as a zero-row ledger', async () => {
+		const file = path.join(tmp, 'fallback.json');
+		writeFileSync(file, '[]');
 		const { rows } = await readLedger({ path: file });
 		assert.deepEqual(rows, []);
 	});
